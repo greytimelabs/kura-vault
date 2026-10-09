@@ -1,0 +1,59 @@
+# ── Secrets & environment ─────────────────────────────────────────
+# Real env files are never committed; only the *.example templates are.
+.env
+.env.*
+!.env.example
+!.env.*.example
+**/.env
+
+# Keys and certificates (e.g. the CloudFront private key)
+*.pem
+*.key
+*.p8
+*.p12
+*.jks
+*.keystore
+*.mobileprovision
+key.properties
+
+# ── Node / TypeScript (backend, web, migration-cli) ───────────────
+node_modules/
+dist/
+*.tsbuildinfo
+.pnpm-store/
+.eslintcache
+.vite/
+
+# ── Tests & coverage ──────────────────────────────────────────────
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# ── Flutter / Dart (app) ──────────────────────────────────────────
+# Platform specifics live in app/**/.gitignore
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+app/**/build/
+
+# ── Logs & temp ───────────────────────────────────────────────────
+*.log
+logs/
+*.tmp
+tmp/
+
+# ── Editors & local tooling ───────────────────────────────────────
+.claude/
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+*.swp
+
+# ── OS ────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

@@ -1,0 +1,62 @@
+import 'package:equatable/equatable.dart';
+
+enum AlbumStatus { initial, loading, loaded, error }
+
+class AlbumItem {
+  final String id;
+  final String kind; // 'regular' (shared) or 'liked' (this device's likes)
+  final String? nameEncrypted; // null for the Liked album
+  final String? nameNonce;
+  final String? coverMediaId;
+  final int sortOrder;
+  final int mediaCount;
+
+  AlbumItem({
+    required this.id,
+    this.kind = 'regular',
+    this.nameEncrypted,
+    this.nameNonce,
+    this.coverMediaId,
+    this.sortOrder = 0,
+    this.mediaCount = 0,
+  });
+
+  bool get isLiked => kind == 'liked';
+
+  factory AlbumItem.fromJson(Map<String, dynamic> json) => AlbumItem(
+        id: json['id'] as String,
+        kind: json['kind'] as String? ?? 'regular',
+        nameEncrypted: json['nameEncrypted'] as String?,
+        nameNonce: json['nameNonce'] as String?,
+        coverMediaId: json['coverMediaId'] as String?,
+        sortOrder: json['sortOrder'] as int? ?? 0,
+        mediaCount: json['mediaCount'] as int? ?? 0,
+      );
+}
+
+class AlbumState extends Equatable {
+  final AlbumStatus status;
+  final List<AlbumItem> albums;
+  final String? errorMessage;
+
+  const AlbumState({
+    this.status = AlbumStatus.initial,
+    this.albums = const [],
+    this.errorMessage,
+  });
+
+  AlbumState copyWith({
+    AlbumStatus? status,
+    List<AlbumItem>? albums,
+    String? errorMessage,
+  }) {
+    return AlbumState(
+      status: status ?? this.status,
+      albums: albums ?? this.albums,
+      errorMessage: errorMessage,
+    );
+  }
+
+  @override
+  List<Object?> get props => [status, albums.length, errorMessage];
+}

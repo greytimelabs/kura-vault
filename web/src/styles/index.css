@@ -1,0 +1,146 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  --color-bg: var(--mv-bg);
+  --color-surface: var(--mv-surface);
+  --color-raised: var(--mv-raised);
+  --color-line: var(--mv-line);
+  --color-ink: var(--mv-ink);
+  --color-muted: var(--mv-muted);
+  --color-accent: var(--mv-accent);
+  --color-accent-ink: var(--mv-accent-ink);
+  --color-accent-soft: var(--mv-accent-soft);
+  --color-danger: var(--mv-danger);
+  --color-tile: var(--mv-tile);
+}
+
+:root {
+  color-scheme: light;
+  --mv-bg: #f6f7f9;
+  --mv-surface: #ffffff;
+  --mv-raised: #ffffff;
+  --mv-line: #e2e6eb;
+  --mv-ink: #18212b;
+  --mv-muted: #5f6c7b;
+  --mv-accent: #3b5266;
+  --mv-accent-ink: #ffffff;
+  --mv-accent-soft: #e6ecf1;
+  --mv-danger: #c0392b;
+  --mv-tile: #e7eaee;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --mv-bg: #0f1418;
+  --mv-surface: #161d23;
+  --mv-raised: #1d262e;
+  --mv-line: #2a353f;
+  --mv-ink: #e8edf2;
+  --mv-muted: #93a1b0;
+  --mv-accent: #9bb6cc;
+  --mv-accent-ink: #0f1418;
+  --mv-accent-soft: #223039;
+  --mv-danger: #ef7a6d;
+  --mv-tile: #212b33;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--mv-bg);
+    color: var(--mv-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* One focus style everywhere, shown for keyboard use only */
+  :focus-visible {
+    outline: 2px solid var(--mv-accent);
+    outline-offset: 2px;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  img {
+    -webkit-user-drag: none;
+    user-select: none;
+  }
+
+  /* Firefox and Chromium/Safari scrollbars, kept unobtrusive */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--mv-line) transparent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@keyframes mv-shimmer {
+  0% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.55;
+  }
+}
+
+@keyframes mv-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes mv-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@utility skeleton {
+  background: var(--mv-tile);
+  animation: mv-shimmer 1.4s ease-in-out infinite;
+}
+
+@utility fade-in {
+  animation: mv-fade-in 160ms ease-out;
+}
+
+@utility pop-in {
+  animation: mv-pop-in 160ms ease-out;
+}

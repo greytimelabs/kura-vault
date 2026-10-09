@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: kuravault-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kuravault}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kuravault_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-kuravault}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kuravault} -d ${POSTGRES_DB:-kuravault}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kuravault-net
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run/postgresql
+
+  # backend:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile
+  #     target: development
+  #   container_name: kuravault-api
+  #   restart: unless-stopped
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   environment:
+  #     NODE_ENV: development
+  #     POSTGRES_HOST: postgres
+  #     POSTGRES_PORT: 5432
+  #     POSTGRES_USER: ${POSTGRES_USER:-kuravault}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kuravault_dev}
+  #     POSTGRES_DB: ${POSTGRES_DB:-kuravault}
+  #     JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production-minimum-64-chars-long-string-here}
+  #     JWT_EXPIRATION: ${JWT_EXPIRATION:-15m}
+  #     JWT_REFRESH_EXPIRATION: ${JWT_REFRESH_EXPIRATION:-7d}
+  #     PORT: 3000
+  #     HASH_SALT_ROUNDS: 12
+  #   ports:
+  #     - "3000:3000"
+  #   volumes:
+  #     - ./backend/src:/app/src
+  #   networks:
+  #     - kuravault-net
+  #   security_opt:
+  #     - no-new-privileges:true
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  kuravault-net:
+    driver: bridge
