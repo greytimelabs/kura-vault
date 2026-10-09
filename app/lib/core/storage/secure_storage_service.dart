@@ -1,7 +1,6 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import '../constants/app_constants.dart';
 
-/// Wrapper around flutter_secure_storage for token persistence.
+/// Wrapper around flutter_secure_storage (Keychain / EncryptedSharedPreferences).
 class SecureStorageService {
   final FlutterSecureStorage _storage;
 
@@ -10,34 +9,10 @@ class SecureStorageService {
           aOptions: AndroidOptions(encryptedSharedPreferences: true),
         );
 
-  Future<void> saveAccessToken(String token) =>
-      _storage.write(key: AppConstants.keyAccessToken, value: token);
+  Future<String?> read(String key) => _storage.read(key: key);
 
-  Future<String?> getAccessToken() =>
-      _storage.read(key: AppConstants.keyAccessToken);
+  Future<void> write(String key, String value) =>
+      _storage.write(key: key, value: value);
 
-  Future<void> saveRefreshToken(String token) =>
-      _storage.write(key: AppConstants.keyRefreshToken, value: token);
-
-  Future<String?> getRefreshToken() =>
-      _storage.read(key: AppConstants.keyRefreshToken);
-
-  Future<void> saveDeviceId(String deviceId) =>
-      _storage.write(key: AppConstants.keyDeviceId, value: deviceId);
-
-  Future<String?> getDeviceId() =>
-      _storage.read(key: AppConstants.keyDeviceId);
-
-  Future<void> saveUserId(String userId) =>
-      _storage.write(key: AppConstants.keyUserId, value: userId);
-
-  Future<String?> getUserId() => _storage.read(key: AppConstants.keyUserId);
-
-  Future<void> saveUserRole(String role) =>
-      _storage.write(key: AppConstants.keyUserRole, value: role);
-
-  Future<String?> getUserRole() =>
-      _storage.read(key: AppConstants.keyUserRole);
-
-  Future<void> clearAll() => _storage.deleteAll();
+  Future<void> delete(String key) => _storage.delete(key: key);
 }

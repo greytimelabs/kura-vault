@@ -9,13 +9,12 @@ import { Button } from '@/components/ui/Button';
 import { ErrorState, StateMessage } from '@/components/ui/StateMessage';
 import { errorMessage } from '@/lib/api/client';
 import { pluralize } from '@/lib/format';
-import { useIsOwner } from '@/state/authStore';
 import { toast } from '@/state/toastStore';
-import { useVaultId } from '@/state/vaultStore';
+import { useCanOrganise, useVaultId } from '@/state/vaultStore';
 
 export function AlbumsPage() {
   const vaultId = useVaultId();
-  const isOwner = useIsOwner();
+  const canOrganise = useCanOrganise();
   const albums = useAlbums(vaultId);
   const { createAlbum } = useAlbumActions(vaultId);
   const [creating, setCreating] = useState(false);
@@ -25,7 +24,7 @@ export function AlbumsPage() {
       <PageHeader
         title="Albums"
         actions={
-          isOwner && (
+          canOrganise && (
             <Button variant="primary" icon={<FolderPlus className="size-4" />} onClick={() => setCreating(true)}>
               New album
             </Button>

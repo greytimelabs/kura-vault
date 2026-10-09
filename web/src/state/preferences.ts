@@ -4,10 +4,11 @@ export type ThemeChoice = 'system' | 'light' | 'dark';
 
 const THEME_KEY = 'mv_theme';
 const AUTO_LOCK_KEY = 'mv_autolock_minutes';
-const DEVICE_ID_KEY = 'mv_device_id';
+const USERNAME_KEY = 'mv_username';
 const SESSION_HINT_KEY = 'mv_session';
 
-export const AUTO_LOCK_OPTIONS = [5, 15, 60, 0] as const; // 0 = never
+// Minutes without input before every key is destroyed. There is no "never".
+export const AUTO_LOCK_OPTIONS = [1, 5, 15] as const;
 const DEFAULT_AUTO_LOCK = 15;
 
 // Storage can throw (blocked cookies, private mode). Preferences are never essential.
@@ -34,10 +35,9 @@ function readTheme(): ThemeChoice {
 }
 
 function readAutoLock(): number {
+  // A value saved by an older build (an hour, or never) falls back to the default
   const value = Number(read(AUTO_LOCK_KEY));
-  return (AUTO_LOCK_OPTIONS as readonly number[]).includes(value) && read(AUTO_LOCK_KEY) !== null
-    ? value
-    : DEFAULT_AUTO_LOCK;
+  return (AUTO_LOCK_OPTIONS as readonly number[]).includes(value) ? value : DEFAULT_AUTO_LOCK;
 }
 
 export function applyTheme(choice: ThemeChoice): void {
@@ -67,10 +67,10 @@ export const usePreferences = create<PreferencesState>((set) => ({
   },
 }));
 
-/** The device ID last used to sign in, to prefill the form. Not a secret. */
-export const rememberedDeviceId = {
-  get: () => read(DEVICE_ID_KEY) ?? '',
-  set: (deviceId: string) => write(DEVICE_ID_KEY, deviceId),
+/** The username last used to sign in, to prefill the form. Not a secret. */
+export const rememberedUsername = {
+  get: () => read(USERNAME_KEY) ?? '',
+  set: (username: string) => write(USERNAME_KEY, username),
 };
 
 /** Whether a refresh cookie probably exists, so a first-time visitor is not sent a pointless refresh. */

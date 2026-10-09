@@ -1,4 +1,5 @@
 import * as Joi from 'joi';
+import { SETUP_KEY_MIN_LENGTH } from '../common/constants';
 
 export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
@@ -13,4 +14,6 @@ export const envValidationSchema = Joi.object({
   JWT_REFRESH_EXPIRATION: Joi.string().default('7d'),
   HASH_SALT_ROUNDS: Joi.number().default(12),
   S3_ENDPOINT: Joi.string().uri().allow('').optional(),
+  // Optional. Without it a setup key is generated and printed while the server has no owner
+  SETUP_KEY: Joi.string().min(SETUP_KEY_MIN_LENGTH).allow('').optional(),
 });

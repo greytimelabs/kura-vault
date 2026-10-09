@@ -52,7 +52,7 @@ export function UploadButton() {
 
 const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes('Files');
 
-/** Whole-window drop target. Only mounted for owners inside the unlocked shell. */
+/** Whole-window drop target. Only mounted for people who can add photos, inside the unlocked shell. */
 export function UploadDropzone() {
   const { vaultId, albumId, albumName } = useUploadTarget();
   const vaultLabel = useVaultStore((s) => s.label);

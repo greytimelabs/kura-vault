@@ -31,41 +31,38 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
   Future<void> _loadPreview() async {
     try {
       final cryptoCubit = context.read<VaultCryptoCubit>();
-      final vaultId = cryptoCubit.state.activeVaultId!;
       final apiClient = context.read<ApiClient>();
+      // The item, with its wrapped key, comes from the list it was opened from
+      final item = context
+          .read<MediaCubit>()
+          .state
+          .items
+          .where((m) => m.id == widget.mediaId)
+          .firstOrNull;
+      final key = item?.key;
+      if (key == null) throw StateError('No key for this item');
 
-      // Get preview URL from API
-      final response = await apiClient.dio.get(
-        ApiEndpoints.mediaUrls(widget.mediaId),
-        queryParameters: {'vaultId': vaultId},
-      );
-
+      // Links live for 60 seconds, so they are requested right before use
+      final response = await apiClient.dio.get(ApiEndpoints.mediaUrls(widget.mediaId));
       final data = response.data['data'] as Map<String, dynamic>;
-      final previewUrl = data['previewUrl'] as String;
-      final previewIv = data['previewIv'] as String;
 
-      // Fetch encrypted preview from S3
+      // Fetch the encrypted preview from storage
       final blobResponse = await Dio().get<List<int>>(
-        previewUrl,
+        data['previewUrl'] as String,
         options: Options(responseType: ResponseType.bytes),
       );
-      final encryptedBytes = Uint8List.fromList(blobResponse.data!);
 
-      // We need the encrypted DEK — fetch from media query
-      // For simplicity, we pass the DEK info via route extras in a real app.
-      // Here we'll use the media endpoint to get it.
-      final mediaResponse = await apiClient.dio.get(
-        ApiEndpoints.media,
-        queryParameters: {'vaultId': vaultId, 'limit': 1},
+      final decrypted = cryptoCubit.decryptMedia(
+        mediaId: widget.mediaId,
+        tier: 'preview',
+        key: key,
+        ivB64: data['previewIv'] as String,
+        encryptedBlob: Uint8List.fromList(blobResponse.data!),
       );
-
-      // Decrypt using the preview IV
-      // Note: In production, pass encryptedDek/dekNonce through navigation
-      // This is a simplified version
       if (mounted) {
         setState(() {
+          _imageBytes = decrypted;
           _loading = false;
-          _error = true; // Placeholder — real impl passes DEK via route
         });
       }
     } catch (e) {

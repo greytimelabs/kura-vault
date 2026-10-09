@@ -8,8 +8,6 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { User } from '../user/entities/user.entity';
 import { RefreshToken } from '../user/entities/refresh-token.entity';
-import { InviteCode } from '../vault/entities/invite-code.entity';
-import { UserVaultAccess } from '../vault/entities/user-vault-access.entity';
 
 @Module({
   imports: [
@@ -22,7 +20,7 @@ import { UserVaultAccess } from '../vault/entities/user-vault-access.entity';
         signOptions: { expiresIn: config.get<string>('jwt.expiration', '15m') as any },
       }),
     }),
-    TypeOrmModule.forFeature([User, RefreshToken, InviteCode, UserVaultAccess]),
+    TypeOrmModule.forFeature([User, RefreshToken]),
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

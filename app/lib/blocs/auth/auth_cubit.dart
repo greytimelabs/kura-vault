@@ -1,87 +1,119 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import '../../core/auth/auth_manager.dart';
+import '../../core/accounts/account_store.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
-import '../../core/storage/secure_storage_service.dart';
+import '../../core/network/interceptors/auth_interceptor.dart';
 import 'auth_state.dart';
 
+/// Accounts and which one is active. Changing the active account, or the
+/// active account losing its login, is what the app shell reacts to by locking
+/// the vault.
 class AuthCubit extends Cubit<AuthState> {
   final ApiClient _apiClient;
-  final AuthManager _authManager;
-  final SecureStorageService _secureStorage;
+  final AccountStore _accounts;
 
   AuthCubit({
     required ApiClient apiClient,
-    required AuthManager authManager,
-    required SecureStorageService secureStorage,
+    required AccountStore accounts,
   })  : _apiClient = apiClient,
-        _authManager = authManager,
-        _secureStorage = secureStorage,
-        super(const AuthState());
-
-  /// Check if user has an existing session.
-  Future<void> checkAuth() async {
-    final isLoggedIn = await _authManager.isLoggedIn();
-    if (isLoggedIn) {
-      final userId = await _secureStorage.getUserId();
-      final role = await _secureStorage.getUserRole();
-      emit(state.copyWith(
-        status: AuthStatus.authenticated,
-        userId: userId,
-        userRole: role,
-      ));
-    } else {
-      emit(state.copyWith(status: AuthStatus.unauthenticated));
-    }
+        _accounts = accounts,
+        super(const AuthState()) {
+    _apiClient.onSessionExpired = (_) => _sync();
   }
 
-  /// Login with device_id + password.
-  Future<void> login({
-    required String deviceId,
+  /// Read the saved accounts.
+  Future<void> init() async {
+    await _accounts.load();
+    _sync();
+  }
+
+  /// Sign in with username + password on [serverUrl] and make that account
+  /// active. The password is used for this one request and not kept.
+  Future<bool> login({
+    required String serverUrl,
+    required String username,
     required String password,
   }) async {
-    emit(state.copyWith(status: AuthStatus.loading));
+    emit(state.copyWith(busy: true));
     try {
-      final response = await _apiClient.dio.post(ApiEndpoints.login, data: {
-        'deviceId': deviceId,
-        'password': password,
-      });
-
-      final data = response.data['data'] as Map<String, dynamic>;
-      await _authManager.saveSession(
-        accessToken: data['accessToken'] as String,
-        refreshToken: data['refreshToken'] as String,
+      final data = await _apiClient.login(
+        serverUrl: serverUrl,
+        username: username,
+        password: password,
+      );
+      await _accounts.saveSignIn(
+        serverUrl: serverUrl,
+        username: username,
         userId: data['user']['id'] as String,
         role: data['user']['role'] as String,
+        accessLevel: data['user']['accessLevel'] as String?,
+        accessToken: data['accessToken'] as String,
+        refreshToken: data['refreshToken'] as String,
       );
-      await _secureStorage.saveDeviceId(deviceId);
-
-      emit(state.copyWith(
-        status: AuthStatus.authenticated,
-        userId: data['user']['id'] as String,
-        userRole: data['user']['role'] as String,
-      ));
+      _sync();
+      return true;
     } catch (e) {
       emit(state.copyWith(
-        status: AuthStatus.error,
-        errorMessage: e.toString(),
+        busy: false,
+        errorMessage: e is DioException ? '${e.error}' : 'Login failed',
       ));
+      return false;
     }
   }
 
-  /// Logout — revoke tokens and clear session.
-  Future<void> logout() async {
+  /// Make another signed-in account the active one.
+  Future<void> switchAccount(String id) async {
+    final account = _accounts.byId(id);
+    if (account == null || !account.signedIn || id == _accounts.activeId) {
+      return;
+    }
+    await _accounts.setActive(id);
+    _sync();
+  }
+
+  /// Sign out of one account — revoke its tokens but remember its server and
+  /// username. If it was the active account and another one is still signed
+  /// in, that one becomes active.
+  Future<void> signOut(String id) async {
+    await _revoke(id);
+    await _accounts.markSignedOut(id);
+    if (id == _accounts.activeId) {
+      final next = _accounts.otherSignedIn(id);
+      if (next != null) await _accounts.setActive(next.id);
+    }
+    _sync();
+  }
+
+  /// Sign out and forget the account on this device.
+  Future<void> removeAccount(String id) async {
+    await _revoke(id);
+    await _accounts.remove(id);
+    _sync();
+  }
+
+  Future<void> _revoke(String id) async {
+    if (!(_accounts.byId(id)?.signedIn ?? false)) return;
     try {
       // Sending this session's token ends only this session, so a browser
       // signed in to the same account stays signed in.
-      final refreshToken = await _secureStorage.getRefreshToken();
-      await _apiClient.dio.post(ApiEndpoints.logout, data: {
-        if (refreshToken != null) 'refreshToken': refreshToken,
-      });
+      final refreshToken = await _accounts.refreshToken(id);
+      await _apiClient.dio.post(
+        ApiEndpoints.logout,
+        data: {if (refreshToken != null) 'refreshToken': refreshToken},
+        options: Options(extra: {AuthInterceptor.accountIdKey: id}),
+      );
     } catch (_) {
       // Best-effort logout
     }
-    await _authManager.clearSession();
-    emit(const AuthState(status: AuthStatus.unauthenticated));
+  }
+
+  void _sync() {
+    if (isClosed) return;
+    emit(AuthState(
+      initialized: true,
+      accounts: _accounts.accounts,
+      activeId: _accounts.activeId,
+    ));
   }
 }

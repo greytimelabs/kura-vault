@@ -17,6 +17,8 @@ import { MediaModule } from './modules/media/media.module';
 import { AlbumModule } from './modules/album/album.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { UserModule } from './modules/user/user.module';
+import { SetupModule } from './modules/setup/setup.module';
+import { AccessModule } from './common/access/access.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -59,6 +61,8 @@ import { HealthModule } from './health/health.module';
     }),
 
     // Feature modules
+    AccessModule,
+    SetupModule,
     UserModule,
     AuthModule,
     VaultModule,

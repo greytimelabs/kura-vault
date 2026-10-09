@@ -3,8 +3,9 @@ import 'dart:typed_data';
 import 'dart:isolate';
 import 'package:pointycastle/pointycastle.dart';
 import 'package:pointycastle/key_derivators/argon2.dart';
+import 'crypto_service.dart';
 
-/// Derives KEK from passphrase using Argon2id.
+/// Derives a key from a passphrase (master or vault) using Argon2id.
 /// Runs in isolate to avoid blocking UI.
 class KeyDerivation {
   /// Derive a 256-bit KEK from passphrase + salt.
@@ -40,14 +41,5 @@ class KeyDerivation {
   }
 
   /// Generate a random salt (16 bytes).
-  static Uint8List generateSalt() {
-    final secureRandom = SecureRandom('Fortuna')
-      ..seed(KeyParameter(
-        Uint8List.fromList(
-          List<int>.generate(
-              32, (_) => DateTime.now().microsecondsSinceEpoch % 256),
-        ),
-      ));
-    return secureRandom.nextBytes(16);
-  }
+  static Uint8List generateSalt() => CryptoService.randomBytes(16);
 }

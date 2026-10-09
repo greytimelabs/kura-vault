@@ -11,8 +11,7 @@ import '../../../../core/storage/cache_service.dart';
 class EncryptedImage extends StatefulWidget {
   final String mediaId;
   final String thumbUrl;
-  final String encryptedDek;
-  final String dekNonce;
+  final MediaKeyRef? mediaKey;
   final String thumbIv;
   final double? width;
   final double? height;
@@ -22,8 +21,7 @@ class EncryptedImage extends StatefulWidget {
     super.key,
     required this.mediaId,
     required this.thumbUrl,
-    required this.encryptedDek,
-    required this.dekNonce,
+    required this.mediaKey,
     required this.thumbIv,
     this.width,
     this.height,
@@ -69,10 +67,11 @@ class _EncryptedImageState extends State<EncryptedImage> {
       // 3. Decrypt
       final cryptoCubit = context.read<VaultCryptoCubit>();
       final decrypted = cryptoCubit.decryptMedia(
-        encryptedBlob: encryptedBytes,
-        encryptedDekB64: widget.encryptedDek,
-        dekNonceB64: widget.dekNonce,
+        mediaId: widget.mediaId,
+        tier: 'thumb',
+        key: widget.mediaKey!,
         ivB64: widget.thumbIv,
+        encryptedBlob: encryptedBytes,
       );
 
       // 4. Cache for next time

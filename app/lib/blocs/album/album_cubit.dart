@@ -33,25 +33,6 @@ class AlbumCubit extends Cubit<AlbumState> {
     }
   }
 
-  /// Create a new album.
-  Future<void> createAlbum({
-    required String vaultId,
-    required String nameEncrypted,
-    required String nameNonce,
-  }) async {
-    try {
-      await _apiClient.dio.post(ApiEndpoints.albums, data: {
-        'vaultId': vaultId,
-        'nameEncrypted': nameEncrypted,
-        'nameNonce': nameNonce,
-      });
-      // Reload albums
-      await loadAlbums(vaultId);
-    } catch (e) {
-      emit(state.copyWith(
-        status: AlbumStatus.error,
-        errorMessage: e.toString(),
-      ));
-    }
-  }
+  /// Forget everything loaded. Used when the account changes.
+  void reset() => emit(const AlbumState());
 }

@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:api": "playwright test -c playwright.api.config.ts",
     "test:e2e": "playwright test",
     "gen:vectors": "tsx scripts/gen-vectors.ts",
     "e2e:firefox-server": "docker run --rm -d --name kuravault-e2e-firefox -p 127.0.0.1:3999:3000 --ipc=host mcr.microsoft.com/playwright:v1.64.0-noble npx -y playwright@1.64.0 run-server --port 3000 --host 0.0.0.0",

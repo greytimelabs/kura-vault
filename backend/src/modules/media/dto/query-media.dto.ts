@@ -1,9 +1,11 @@
-import { IsOptional, IsUUID, IsString, IsNumber, Min, Max } from 'class-validator';
+import { IsOptional, IsUUID, IsString, IsNumber, Min, Max, ValidateIf } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QueryMediaDto {
+  /** Required unless `albumId` is given. */
+  @ValidateIf((dto: QueryMediaDto) => !dto.albumId || dto.vaultId !== undefined)
   @IsUUID()
-  vaultId: string;
+  vaultId?: string;
 
   @IsOptional()
   @IsUUID()

@@ -1,8 +1,8 @@
 import * as crypto from 'crypto';
 import * as bcrypt from 'bcrypt';
-import { UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { UserRole } from '../../common/types';
+import { AccessLevel, UserRole, UserStatus } from '../../common/types';
 
 const sha256 = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
 
@@ -21,8 +21,6 @@ function makeService() {
   const service = new AuthService(
     userRepo as any,
     refreshTokenRepo as any,
-    {} as any,
-    {} as any,
     jwtService as any,
     configService as any,
   );
@@ -34,16 +32,16 @@ describe('AuthService sessions', () => {
     const { service, userRepo, refreshTokenRepo } = makeService();
     userRepo.findOne.mockResolvedValue({
       id: 'user-1',
-      deviceId: 'device-1',
-      name: 'Phone',
+      username: 'user-one',
       role: UserRole.OWNER,
-      isActive: true,
+      accessLevel: AccessLevel.FULL,
+      status: UserStatus.ACTIVE,
       lockedUntil: null,
       failedLoginAttempts: 0,
       passwordHash: await bcrypt.hash('Correct-Horse-1!', 4),
     });
 
-    const result = await service.login({ deviceId: 'device-1', password: 'Correct-Horse-1!' });
+    const result = await service.login({ username: 'user-one', password: 'Correct-Horse-1!' });
 
     expect(result.refreshToken).toHaveLength(128);
     expect(refreshTokenRepo.update).not.toHaveBeenCalled();
@@ -58,7 +56,7 @@ describe('AuthService sessions', () => {
   it('logout with a token ends only that session', async () => {
     const { service, refreshTokenRepo } = makeService();
 
-    await service.logout('user-1', 'device-1', 'the-refresh-token');
+    await service.logout('user-1', 'user-one', 'the-refresh-token');
 
     expect(refreshTokenRepo.update).toHaveBeenCalledTimes(1);
     expect(refreshTokenRepo.update).toHaveBeenCalledWith(
@@ -67,13 +65,13 @@ describe('AuthService sessions', () => {
     );
   });
 
-  it('logout without a token ends every session of the device', async () => {
+  it('logout without a token ends every session of the user', async () => {
     const { service, refreshTokenRepo } = makeService();
 
-    await service.logout('user-1', 'device-1');
+    await service.logout('user-1', 'user-one');
 
     expect(refreshTokenRepo.update).toHaveBeenCalledWith(
-      { userId: 'user-1', deviceId: 'device-1', isRevoked: false },
+      { userId: 'user-1', username: 'user-one', isRevoked: false },
       { isRevoked: true },
     );
   });
@@ -95,7 +93,7 @@ describe('AuthService sessions', () => {
       userId: 'user-1',
       isRevoked: false,
       expiresAt: new Date(Date.now() + 60_000),
-      user: { id: 'user-1', deviceId: 'device-1', role: UserRole.VIEWER, isActive: true },
+      user: { id: 'user-1', username: 'user-one', role: UserRole.MEMBER, accessLevel: AccessLevel.LIMITED, status: UserStatus.ACTIVE },
     };
     refreshTokenRepo.findOne.mockResolvedValue(stored);
 
@@ -104,5 +102,40 @@ describe('AuthService sessions', () => {
     expect(stored.isRevoked).toBe(true);
     expect(result.accessToken).toBe('access-token');
     expect(result.refreshToken).not.toBe('current');
+  });
+
+  it('a restricted account can neither sign in nor refresh', async () => {
+    const { service, userRepo, refreshTokenRepo } = makeService();
+    const restricted = {
+      id: 'user-1',
+      username: 'user-one',
+      role: UserRole.MEMBER,
+      accessLevel: AccessLevel.LIMITED,
+      status: UserStatus.RESTRICTED,
+      lockedUntil: null,
+      failedLoginAttempts: 0,
+      passwordHash: await bcrypt.hash('Correct-Horse-1!', 4),
+    };
+    userRepo.findOne.mockResolvedValue(restricted);
+    await expect(service.login({ username: 'user-one', password: 'Correct-Horse-1!' })).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+
+    refreshTokenRepo.findOne.mockResolvedValue({
+      userId: 'user-1',
+      isRevoked: false,
+      expiresAt: new Date(Date.now() + 60_000),
+      user: restricted,
+    });
+    await expect(service.refreshAccessToken('current')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(refreshTokenRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('revokeAllSessions ends every session of the user', async () => {
+    const { service, refreshTokenRepo } = makeService();
+
+    await service.revokeAllSessions('user-1');
+
+    expect(refreshTokenRepo.update).toHaveBeenCalledWith({ userId: 'user-1', isRevoked: false }, { isRevoked: true });
   });
 });

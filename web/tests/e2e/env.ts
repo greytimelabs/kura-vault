@@ -3,6 +3,9 @@
 export const WEB_PORT = 5273;
 export const API_PORT = 3100;
 export const WEB_URL = `http://localhost:${WEB_PORT}`;
+// A second build of the client in multi-server mode, served apart from the API
+export const MULTI_WEB_PORT = 5274;
+export const MULTI_WEB_URL = `http://localhost:${MULTI_WEB_PORT}`;
 export const API_URL = `http://localhost:${API_PORT}/api/v1`;
 
 export const DB_CONTAINER = 'kuravault-e2e-db';
@@ -17,10 +20,13 @@ export const DB = {
 export const S3_BUCKET = 'kura-vault-e2e';
 export const S3_REGION = 'ap-south-1';
 
+/** What the server would otherwise generate and print at first start. */
+export const SETUP_KEY = 'e2e-setup-key-0123456789abcdef0123456789';
+
 export const OWNER = {
-  name: 'E2E owner',
-  deviceId: 'e2e-owner',
+  username: 'e2e-owner',
   password: 'Owner-Passw0rd!-e2e',
+  passphrase: 'owner master passphrase for e2e',
 };
 
 /** Environment for the backend instance the tests run against. */
@@ -44,9 +50,10 @@ export const backendEnv: Record<string, string> = {
   S3_BUCKET_NAME: S3_BUCKET,
   // Empty on purpose: stops backend/.env from pointing the run at a real R2 endpoint
   S3_ENDPOINT: '',
-  CORS_ORIGINS: WEB_URL,
+  CORS_ORIGINS: `${WEB_URL},${MULTI_WEB_URL}`,
   // The suite drives three browsers at once from one address
   THROTTLE_TTL: '60',
   THROTTLE_LIMIT: '100000',
   HASH_SALT_ROUNDS: '4',
+  SETUP_KEY,
 };

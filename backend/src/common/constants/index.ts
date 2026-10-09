@@ -1,6 +1,7 @@
-export const MAX_DEVICES = 10;
-export const INVITE_CODE_EXPIRY_HOURS = 24;
-export const INVITE_CODE_LENGTH = 32;
+export const MAX_USERS = 10;
+export const INVITE_EXPIRY_HOURS = 24;
+export const SETUP_KEY_BYTES = 32;
+export const SETUP_KEY_MIN_LENGTH = 32;
 export const MAX_UPLOAD_BATCH = 50;
 export const DEFAULT_PAGE_SIZE = 50;
 export const MAX_PAGE_SIZE = 100;
@@ -9,3 +10,4 @@ export const UPLOAD_URL_EXPIRY_SECONDS = 900; // 15 min
 export const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 export const REFRESH_COOKIE_NAME = 'mv_refresh';
 export const REFRESH_COOKIE_PATH = '/api/v1/auth';
+export const PG_UNIQUE_VIOLATION = '23505';

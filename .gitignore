@@ -19,6 +19,7 @@ key.properties
 # ── Node / TypeScript (backend, web, migration-cli) ───────────────
 node_modules/
 dist/
+dist-multi/
 *.tsbuildinfo
 .pnpm-store/
 .eslintcache

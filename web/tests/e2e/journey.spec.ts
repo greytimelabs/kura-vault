@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { expect, request as apiRequest, test, type BrowserContext, type Page } from '@playwright/test';
-import { API_URL, OWNER } from './env';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { ApiError, ApiUser } from './apiUser';
+import { OWNER } from './env';
 import { FakeStorage } from './fakeStorage';
 
 const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
@@ -9,7 +10,7 @@ const FIXTURES = ['march.jpg', 'portrait.png', 'wide.webp'];
 
 test.describe.configure({ mode: 'serial' });
 
-// One storage per browser project: what the owner uploads, the invited viewer must be able to read
+// One storage per browser project: what the owner uploads, the people it is shared with must be able to read
 const storage = new FakeStorage();
 let context: BrowserContext;
 let page: Page;
@@ -17,7 +18,10 @@ let project: string;
 let passphrase: string;
 let familyLabel: string;
 let workLabel: string;
-let inviteCode: string;
+const MEMBER_PASSWORD = 'Member-Passw0rd!-e2e';
+const MEMBER_PASSPHRASE = 'member master passphrase for e2e';
+let memberName: string;
+let member: { context: BrowserContext; page: Page };
 const problems: string[] = [];
 
 function watch(target: Page): void {
@@ -37,17 +41,24 @@ async function newSession(browser: import('@playwright/test').Browser): Promise<
   return { context: ctx, page: p };
 }
 
-async function login(target: Page, deviceId: string, password: string): Promise<void> {
+async function login(target: Page, username: string, password: string): Promise<void> {
   await target.goto('/login');
-  await target.getByLabel('Device ID', { exact: true }).fill(deviceId);
+  await target.getByLabel('Username', { exact: true }).fill(username);
   await target.getByLabel('Password', { exact: true }).fill(password);
   await target.getByRole('button', { name: 'Login' }).click();
   await expect(target).toHaveURL(/\/unlock$/);
 }
 
+/** The master passphrase: loads the account's keys and shows what can be opened. */
+async function unlock(target: Page, value: string): Promise<void> {
+  await target.getByLabel('Master passphrase', { exact: true }).fill(value);
+  await target.getByRole('button', { name: 'Unlock' }).click();
+}
+
+/** A vault passphrase, on the screen that follows the master passphrase. */
 async function enterPassphrase(target: Page, value: string): Promise<void> {
   await target.getByLabel('Vault passphrase', { exact: true }).fill(value);
-  await target.getByRole('button', { name: 'Unlock' }).click();
+  await target.getByRole('button', { name: 'Open', exact: true }).click();
 }
 
 // Scoped to the photo grid: navigation and the upload panel have list items of their own
@@ -82,10 +93,17 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('owner signs in and creates a vault', async () => {
+test('owner signs in, unlocks and creates a vault', async () => {
   await page.goto('/');
   await expect(page).toHaveURL(/\/login$/);
-  await login(page, OWNER.deviceId, OWNER.password);
+  await login(page, OWNER.username, OWNER.password);
+
+  // Nothing about any vault is shown before the master passphrase
+  await expect(page.getByRole('button', { name: 'Create a vault' })).toHaveCount(0);
+  await unlock(page, `${OWNER.passphrase} wrong`);
+  await expect(page.getByText('Invalid passphrase')).toBeVisible();
+  await unlock(page, OWNER.passphrase);
+  await expect(page.getByRole('heading', { name: 'Open a vault' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Create a vault' }).click();
   const dialog = page.getByRole('dialog', { name: 'Create a vault' });
@@ -259,39 +277,86 @@ test('dropping a file on an album uploads it into that album', async () => {
   await page.getByTestId('upload-panel').getByRole('button', { name: 'Dismiss' }).click();
 });
 
-test('owner creates an invite code', async () => {
+test('the owner adds a user, who joins from the invite link with their own secrets', async ({ browser }) => {
+  memberName = `e2e-member-${project}`;
   await openSection(page, 'Settings');
-  await page.getByRole('button', { name: 'Create code' }).click();
-  const code = page.getByTestId('invite-code');
-  await expect(code).toBeVisible();
-  inviteCode = (await code.innerText()).trim();
-  expect(inviteCode).toMatch(/^[0-9a-f]{64}$/);
-  await page.getByRole('button', { name: 'Done' }).click();
+  await page.getByRole('button', { name: 'Manage users' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Users' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Add user' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Username', { exact: true }).fill(memberName);
+  await dialog.getByRole('button', { name: 'Create invite link' }).click();
+  const link = await dialog.getByTestId('invite-link').inputValue();
+  // The secret is in the fragment, which browsers never send to a server
+  expect(link).toMatch(/\/join#v1\.[A-Za-z0-9_-]+$/);
+  await dialog.getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByText('has not joined yet')).toBeVisible();
+
+  const session = await newSession(browser);
+  member = session;
+  const joiner = session.page;
+  await joiner.goto(link);
+  await expect(joiner.getByTestId('join-username')).toHaveText(memberName);
+  // The secret leaves the address bar as soon as it has been read
+  expect(new URL(joiner.url()).hash).toBe('');
+
+  // Rules are checked before anything is sent, and the two secrets must differ
+  await joiner.getByLabel('Password', { exact: true }).fill('short');
+  await joiner.getByRole('button', { name: 'Create account' }).click();
+  await expect(joiner.getByText(/At least 12 characters/)).toBeVisible();
+  await joiner.getByLabel('Password', { exact: true }).fill(MEMBER_PASSWORD);
+  await joiner.getByLabel('Confirm password', { exact: true }).fill(MEMBER_PASSWORD);
+  await joiner.getByLabel('Master passphrase', { exact: true }).fill(MEMBER_PASSWORD);
+  await joiner.getByLabel('Confirm master passphrase', { exact: true }).fill(MEMBER_PASSWORD);
+  await joiner.getByRole('button', { name: 'Create account' }).click();
+  await expect(joiner.getByText('Must be different from the password')).toBeVisible();
+
+  await joiner.getByLabel('Master passphrase', { exact: true }).fill(MEMBER_PASSPHRASE);
+  await joiner.getByLabel('Confirm master passphrase', { exact: true }).fill(MEMBER_PASSPHRASE);
+  await joiner.getByRole('button', { name: 'Create account' }).click();
+
+  // Signed in and unlocked. A limited user has no vaults to create and nothing shared yet
+  await expect(joiner).toHaveURL(/\/unlock$/);
+  await expect(joiner.getByText('Nothing has been shared with you yet')).toBeVisible();
+  await expect(joiner.getByRole('button', { name: 'Create a vault' })).toHaveCount(0);
+  await expect(joiner.getByLabel('Vault passphrase', { exact: true })).toHaveCount(0);
+  await expect(joiner.getByRole('link', { name: 'Manage users' })).toHaveCount(0);
+
+  // The link works once
+  const again = await newSession(browser);
+  await again.page.goto(link);
+  await expect(again.page.getByText(/expired or was already used/)).toBeVisible();
+  await again.context.close();
+
+  // The owner's client verifies the new keys against the link's secret and signs them
+  await page.reload();
+  await unlock(page, OWNER.passphrase);
+  await page.getByRole('link', { name: 'Manage users' }).click();
+  await expect(page.getByTestId(`user-${memberName}`)).toContainText('Keys verified');
 });
 
-test('an invited device can view but not manage', async ({ browser }) => {
-  const viewerDevice = { deviceId: `e2e-viewer-${project}`, password: 'Viewer-Passw0rd!-e2e' };
-  const session = await newSession(browser);
-  const viewer = session.page;
+test('a vault shared view-only opens without its passphrase and cannot be changed', async () => {
+  await page.getByRole('link', { name: 'Back' }).click();
+  await enterPassphrase(page, passphrase);
+  await openSection(page, 'Settings');
+  await page.getByRole('button', { name: 'Share', exact: true }).click();
+  const share = page.getByRole('dialog', { name: `Share ${familyLabel}` });
+  await share.getByLabel('Share with', { exact: true }).selectOption({ label: memberName });
+  await share.getByRole('button', { name: 'Share', exact: true }).click();
+  await expect(share.getByTestId(`member-${memberName}`)).toBeVisible();
+  await page.keyboard.press('Escape');
 
-  await viewer.goto('/register');
-  await viewer.getByLabel('Device name', { exact: true }).fill(`Viewer ${project}`);
-  await viewer.getByLabel('Device ID', { exact: true }).fill(viewerDevice.deviceId);
+  const viewer = member.page;
+  await viewer.reload();
+  await unlock(viewer, MEMBER_PASSPHRASE);
+  // Listed by name, with who shared it: the key arrived sealed to this user's public key
+  const shared = viewer.getByRole('region', { name: 'Shared with you' });
+  await expect(shared.getByRole('button')).toHaveCount(1);
+  await expect(shared).toContainText(`Vault from ${OWNER.username}`);
+  await expect(shared).toContainText('view only');
+  await shared.getByRole('button', { name: new RegExp(familyLabel) }).click();
 
-  // Password rules are checked before anything is sent
-  await viewer.getByLabel('Password', { exact: true }).fill('short');
-  await viewer.getByRole('button', { name: 'Register' }).click();
-  await expect(viewer.getByText(/Needs: at least 12 characters/)).toBeVisible();
-
-  await viewer.getByLabel('Password', { exact: true }).fill(viewerDevice.password);
-  await viewer.getByLabel('Invite code', { exact: true }).fill(inviteCode);
-  await viewer.getByRole('button', { name: 'Register' }).click();
-  await expect(viewer).toHaveURL(/\/unlock$/);
-
-  // Non-owners are not offered vault creation
-  await expect(viewer.getByRole('button', { name: 'Create a vault' })).toHaveCount(0);
-
-  await enterPassphrase(viewer, passphrase);
   await expect(viewer).toHaveURL(/\/timeline$/);
   await expectTilesDecrypted(viewer, 4);
 
@@ -299,72 +364,162 @@ test('an invited device can view but not manage', async ({ browser }) => {
   await expect(viewer.getByTestId('upload-input')).toHaveCount(0);
   await tiles(viewer).first().hover();
   await expect(viewer.getByRole('checkbox')).toHaveCount(0);
-
+  await openSection(viewer, 'Albums');
+  await expect(viewer.getByRole('button', { name: 'New album' })).toHaveCount(0);
+  await expect(viewer.getByRole('link', { name: /Road trip/ })).toContainText('2 items');
   await openSection(viewer, 'Settings');
-  await expect(viewer.getByText('Owner tools')).toHaveCount(0);
+  await expect(viewer.getByRole('button', { name: 'Share', exact: true })).toHaveCount(0);
+  await expect(viewer.getByRole('button', { name: 'Manage users' })).toHaveCount(0);
 
   // The server refuses too, whatever a client shows
-  const api = await apiRequest.newContext();
-  const tokens = await (
-    await api.post(`${API_URL}/auth/login`, { data: viewerDevice })
-  ).json();
-  const vaults = await (
-    await api.get(`${API_URL}/vaults`, { headers: { Authorization: `Bearer ${tokens.data.accessToken}` } })
-  ).json();
-  const refused = await api.post(`${API_URL}/media/upload/init`, {
-    headers: { Authorization: `Bearer ${tokens.data.accessToken}` },
-    data: { vaultId: vaults.data[0].id, mediaType: 'photo' },
-  });
-  expect(refused.status()).toBe(403);
-  await api.dispose();
-
-  // Logging this device out ...
-  await viewer.getByRole('button', { name: 'Logout' }).click();
-  await expect(viewer).toHaveURL(/\/login$/);
-  await session.context.close();
-
-  // ... leaves the owner's session alone
-  await page.reload();
-  await expect(page).toHaveURL(/\/unlock$/);
+  const api = await ApiUser.signIn({ username: memberName, password: MEMBER_PASSWORD, passphrase: MEMBER_PASSPHRASE });
+  const [vault] = await api.vaults();
+  const refused = await api.call('POST', '/media/upload/init', { vaultId: vault!.id, mediaType: 'photo' }).catch((e) => e);
+  expect(refused).toBeInstanceOf(ApiError);
+  expect((refused as ApiError).status).toBe(403);
 });
 
-test('a reload keeps the sign-in but always asks for the passphrase', async () => {
-  // The previous step reloaded on Settings: signed in (refresh cookie), keys gone
-  await expect(page.getByRole('heading', { name: 'Enter Passphrase' })).toBeVisible();
+test('write access lets the user add photos; removing the share ends access at once', async () => {
+  const share = page.getByRole('dialog', { name: `Share ${familyLabel}` });
+  await page.getByRole('button', { name: 'Share', exact: true }).click();
+  await share.getByLabel(`Permission for ${memberName}`).selectOption('write');
+  await expect(page.getByText(`Updated ${memberName}`)).toBeVisible();
 
+  const viewer = member.page;
+  await viewer.getByRole('button', { name: 'Close', exact: true }).click();
+  // Closing a vault keeps the account unlocked: no master passphrase again
+  await expect(viewer.getByRole('region', { name: 'Shared with you' })).toContainText('can add photos');
+  await viewer.getByRole('region', { name: 'Shared with you' }).getByRole('button').click();
+  await viewer.getByTestId('upload-input').setInputFiles(fixture('march.jpg'));
+  await expect(viewer.getByTestId('upload-panel').getByRole('status')).toHaveText('1 uploaded', { timeout: 60_000 });
+  await expectTilesDecrypted(viewer, 5);
+
+  await share.getByTestId(`member-${memberName}`).getByRole('button', { name: 'Remove' }).click();
+  await expect(share.getByText('Only you.')).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // The server refuses the very next request, and the vault is gone from what they can open
+  const api = await ApiUser.signIn({ username: memberName, password: MEMBER_PASSWORD, passphrase: MEMBER_PASSPHRASE });
+  expect(await api.vaults()).toEqual([]);
+  await viewer.getByRole('button', { name: 'Close vault' }).click();
+  await expect(viewer.getByText('Nothing has been shared with you yet')).toBeVisible();
+});
+
+test('one album can be shared on its own, and restricting the user signs them out', async () => {
+  await openSection(page, 'Albums');
+  await page.getByRole('link', { name: /Road trip/ }).click();
+  await page.getByRole('button', { name: 'Share', exact: true }).click();
+  const share = page.getByRole('dialog', { name: 'Share Road trip' });
+  await share.getByLabel('Share with', { exact: true }).selectOption({ label: memberName });
+  await share.getByLabel('Permission', { exact: true }).selectOption('write');
+  await share.getByRole('button', { name: 'Share', exact: true }).click();
+  await expect(share.getByTestId(`member-${memberName}`)).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  const viewer = member.page;
+  await viewer.reload();
+  await unlock(viewer, MEMBER_PASSPHRASE);
+  const shared = viewer.getByRole('region', { name: 'Shared with you' });
+  await expect(shared).toContainText(`Album from ${OWNER.username}`);
+  await shared.getByRole('button', { name: /Road trip/ }).click();
+
+  // Only the album: its two photos, no timeline and no other albums
+  await expect(viewer).toHaveURL(/\/albums\/[0-9a-f-]{36}$/);
+  await expect(viewer.getByRole('heading', { level: 1, name: 'Road trip' })).toBeVisible();
+  await expectTilesDecrypted(viewer, 2);
+  await expect(viewer.getByRole('navigation', { name: 'Main' }).first().getByRole('link', { name: 'Timeline' })).toHaveCount(0);
+  await viewer.goto('/timeline');
+  await unlock(viewer, MEMBER_PASSPHRASE);
+  await viewer.getByRole('region', { name: 'Shared with you' }).getByRole('button', { name: /Road trip/ }).click();
+  await expect(viewer).toHaveURL(/\/albums\/[0-9a-f-]{36}$/);
+
+  // With write access they can add to the album, and the owner can read what they added
+  await viewer.getByTestId('upload-input').setInputFiles(fixture('portrait.png'));
+  await expect(viewer.getByTestId('upload-panel').getByRole('status')).toHaveText('1 uploaded', { timeout: 60_000 });
+  await expectTilesDecrypted(viewer, 3);
+  await page.reload();
+  await unlock(page, OWNER.passphrase);
+  await enterPassphrase(page, passphrase);
+  await expectTilesDecrypted(page, 3);
+  await openSection(page, 'Timeline');
+  await expectTilesDecrypted(page, 6);
+
+  // Restricting cuts the session and removes what was shared
+  await openSection(page, 'Settings');
+  await page.getByRole('button', { name: 'Manage users' }).click();
+  page.once('dialog', (dialog) => void dialog.accept());
+  await page.getByTestId(`user-${memberName}`).getByRole('button', { name: 'Restrict' }).click();
+  await expect(page.getByTestId(`user-${memberName}`)).toContainText('Restricted');
+
+  await viewer.reload();
+  await expect(viewer).toHaveURL(/\/login$/);
+  await viewer.getByLabel('Username', { exact: true }).fill(memberName);
+  await viewer.getByLabel('Password', { exact: true }).fill(MEMBER_PASSWORD);
+  await viewer.getByRole('button', { name: 'Login' }).click();
+  await expect(viewer.getByText('Account has been deactivated')).toBeVisible();
+  await member.context.close();
+
+  // Managing users did not close the owner's vault
+  await page.getByRole('link', { name: 'Back' }).click();
+  await expect(page).toHaveURL(/\/timeline$/);
+  await openSection(page, 'Settings');
+});
+
+test('a reload keeps the sign-in but always asks for the passphrases', async () => {
+  await page.reload();
+  // Signed in (refresh cookie), keys gone
+  await expect(page).toHaveURL(/\/unlock$/);
+  await expect(page.getByRole('heading', { name: 'Unlock' })).toBeVisible();
+
+  await unlock(page, OWNER.passphrase);
   await enterPassphrase(page, `${passphrase} wrong`);
   await expect(page.getByText('Invalid passphrase')).toBeVisible();
   await expect(page.getByLabel('Vault passphrase', { exact: true })).toHaveValue('');
+  // The master passphrase is not a vault passphrase
+  await enterPassphrase(page, OWNER.passphrase);
+  await expect(page.getByText('Invalid passphrase')).toBeVisible();
 
   await enterPassphrase(page, passphrase);
   // Back to the screen that was open before the reload
   await expect(page).toHaveURL(/\/settings$/);
 });
 
-test('locking removes decrypted media from the page', async () => {
+test('closing and locking remove decrypted media from the page', async () => {
   await openSection(page, 'Timeline');
-  await expectTilesDecrypted(page, 4);
+  await expectTilesDecrypted(page, 6);
   // Thumbnails are in-memory object URLs, never data written to storage
   expect(await tiles(page).first().locator('img').getAttribute('src')).toMatch(/^blob:/);
 
-  await page.getByRole('button', { name: 'Lock vault' }).click();
+  // Closing leaves the account unlocked but the vault needs its passphrase again
+  await page.getByRole('button', { name: 'Close vault' }).click();
   await expect(page).toHaveURL(/\/unlock$/);
   await expect(page.locator('img')).toHaveCount(0);
+  await expect(page.getByLabel('Master passphrase', { exact: true })).toHaveCount(0);
+  await enterPassphrase(page, passphrase);
+  await expectTilesDecrypted(page, 6);
 
+  // Locking destroys every key: master passphrase first, then the vault's
+  await page.getByRole('button', { name: 'Lock', exact: true }).click();
+  await expect(page).toHaveURL(/\/unlock$/);
+  await expect(page.locator('img')).toHaveCount(0);
+  await expect(page.getByLabel('Vault passphrase', { exact: true })).toHaveCount(0);
+
+  await unlock(page, OWNER.passphrase);
   await enterPassphrase(page, passphrase);
   await expect(page).toHaveURL(/\/timeline$/);
-  await expectTilesDecrypted(page, 4);
+  await expectTilesDecrypted(page, 6);
 });
 
 test('the same account can be signed in twice; logging out one keeps the other', async ({ browser }) => {
   const second = await newSession(browser);
-  await login(second.page, OWNER.deviceId, OWNER.password);
+  await login(second.page, OWNER.username, OWNER.password);
   await second.page.getByRole('button', { name: 'Logout' }).click();
   await expect(second.page).toHaveURL(/\/login$/);
   await second.context.close();
 
   await page.reload();
   await expect(page).toHaveURL(/\/unlock$/);
+  await unlock(page, OWNER.passphrase);
   await enterPassphrase(page, passphrase);
   await expect(page).toHaveURL(/\/timeline$/);
 });
@@ -381,12 +536,12 @@ test('one passphrase on two vaults offers a choice of exactly those vaults', asy
   // Creating a vault from Settings does not switch vaults
   await expect(page.getByTestId('vault-label')).toHaveText(familyLabel);
 
-  await page.getByRole('button', { name: 'Lock now' }).click();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
   await enterPassphrase(page, passphrase);
 
   const picker = page.getByRole('dialog', { name: 'Select vault' });
   await expect(picker).toBeVisible();
-  // Other browsers' vaults exist on this server too; only the two that matched are listed
+  // The other browsers' vaults belong to this account too; only the two that matched are listed
   await expect(picker.getByRole('listitem')).toHaveCount(2);
   await picker.getByRole('button', { name: workLabel }).click();
 
@@ -395,7 +550,7 @@ test('one passphrase on two vaults offers a choice of exactly those vaults', asy
   await expect(page.getByRole('heading', { name: 'No photos yet' })).toBeVisible();
 
   // Dismissing the picker opens nothing
-  await page.getByRole('button', { name: 'Lock vault' }).click();
+  await page.getByRole('button', { name: 'Close vault' }).click();
   await enterPassphrase(page, passphrase);
   await expect(picker).toBeVisible();
   await page.keyboard.press('Escape');
@@ -405,7 +560,7 @@ test('one passphrase on two vaults offers a choice of exactly those vaults', asy
   await enterPassphrase(page, passphrase);
   await picker.getByRole('button', { name: familyLabel }).click();
   await expect(page.getByTestId('vault-label')).toHaveText(familyLabel);
-  await expectTilesDecrypted(page, 4);
+  await expectTilesDecrypted(page, 6);
 });
 
 test('expired download links are renewed without the user noticing', async () => {
@@ -419,7 +574,7 @@ test('expired download links are renewed without the user noticing', async () =>
   await page.waitForTimeout(1100);
   storage.expireExistingLinks();
   await openSection(page, 'Timeline');
-  await expectTilesDecrypted(page, 4);
+  await expectTilesDecrypted(page, 6);
 
   // The viewer asks for its links at the moment of use, so it is unaffected
   await tiles(page).first().getByRole('button', { name: /^(Photo|Video)/ }).click();
@@ -429,38 +584,13 @@ test('expired download links are renewed without the user noticing', async () =>
   await expect(page.getByTestId('viewer')).toBeHidden();
 });
 
-test('media links cannot be requested through a different vault', async () => {
-  const api = await apiRequest.newContext();
-  const tokens = await (
-    await api.post(`${API_URL}/auth/login`, { data: { deviceId: OWNER.deviceId, password: OWNER.password } })
-  ).json();
-  const headers = { Authorization: `Bearer ${tokens.data.accessToken}` };
-  const vaults: { id: string }[] = (await (await api.get(`${API_URL}/vaults`, { headers })).json()).data;
-
-  let filled: { vaultId: string; mediaId: string } | undefined;
-  let empty: string | undefined;
-  for (const vault of vaults) {
-    const media = (await (await api.get(`${API_URL}/media?vaultId=${vault.id}&limit=1`, { headers })).json()).data;
-    if (media.total > 0) filled ??= { vaultId: vault.id, mediaId: media.data[0].id };
-    else empty ??= vault.id;
-  }
-  expect(filled).toBeDefined();
-  expect(empty).toBeDefined();
-
-  const own = await api.get(`${API_URL}/media/${filled!.mediaId}/urls?vaultId=${filled!.vaultId}`, { headers });
-  expect(own.status()).toBe(200);
-  // The owner has access to both vaults, but this photo is not in the second one
-  const crossed = await api.get(`${API_URL}/media/${filled!.mediaId}/urls?vaultId=${empty}`, { headers });
-  expect(crossed.status()).toBe(404);
-  await api.dispose();
-});
-
 test('theme choice applies and survives a reload', async () => {
   await openSection(page, 'Settings');
   await page.getByRole('radio', { name: 'Dark' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await unlock(page, OWNER.passphrase);
   await enterPassphrase(page, passphrase);
   await picker(page, familyLabel);
   await page.getByRole('radio', { name: 'Light' }).click();
@@ -470,8 +600,8 @@ test('theme choice applies and survives a reload', async () => {
 test('logout returns to sign-in and nothing broke along the way', async () => {
   await page.getByRole('button', { name: 'Logout' }).click();
   await expect(page).toHaveURL(/\/login$/);
-  // The device ID is remembered for next time; the password never is
-  await expect(page.getByLabel('Device ID', { exact: true })).toHaveValue(OWNER.deviceId);
+  // The username is remembered for next time; the password never is
+  await expect(page.getByLabel('Username', { exact: true })).toHaveValue(OWNER.username);
   await expect(page.getByLabel('Password', { exact: true })).toHaveValue('');
 
   // A signed-out reload stays signed out

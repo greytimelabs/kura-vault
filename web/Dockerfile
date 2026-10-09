@@ -8,6 +8,10 @@ COPY . .
 # (for Cloudflare R2: https://<account-id>.r2.cloudflarestorage.com)
 ARG VITE_S3_ORIGIN
 ENV VITE_S3_ORIGIN=$VITE_S3_ORIGIN
+# A client hosted apart from any server, where users type their server address:
+# --build-arg VITE_MULTI_SERVER=true, and run with S3_ORIGIN=https: (see docs/getting-started.md)
+ARG VITE_MULTI_SERVER
+ENV VITE_MULTI_SERVER=$VITE_MULTI_SERVER
 RUN pnpm exec vite build
 
 FROM nginxinc/nginx-unprivileged:alpine

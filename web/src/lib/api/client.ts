@@ -1,4 +1,7 @@
-import type { RefreshResponse, SessionUser, UserRole } from './types';
+import type { AccessLevel, RefreshResponse, SessionUser, UserRole } from './types';
+import { MULTI_SERVER } from '../config';
+import { apiBaseOf } from '../serverUrl';
+import { accounts } from '@/state/accountStore';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api/v1';
 const REFRESH_LOCK = 'mv-auth-refresh';
@@ -23,14 +26,36 @@ export class NetworkError extends Error {
 }
 
 // The access token lives only in this module's memory: never in storage, never in
-// the DOM. The refresh token is an httpOnly cookie this code cannot read at all.
+// the DOM. The refresh token is an httpOnly cookie this code cannot read at all;
+// only the multi-server client keeps it in storage instead (see lib/config.ts).
 let accessToken: string | null = null;
 let sessionLostHandler: (() => void) | null = null;
 
+// Multi-server only: the account every request is made for. Null in the
+// same-origin client, which has exactly one server.
+let activeAccount: { id: string; apiBase: string } | null = null;
+
+/**
+ * Point the client at an account's server (multi-server only). The previous
+ * account's access token is dropped; the next request refreshes for the new one.
+ */
+export function setActiveAccount(account: { id: string; serverUrl: string } | null): void {
+  activeAccount = account ? { id: account.id, apiBase: apiBaseOf(account.serverUrl) } : null;
+  accessToken = null;
+}
+
+const currentBase = () => activeAccount?.apiBase ?? API_BASE;
+
+/** A request that was still running when the user switched accounts. Its answer belongs to nobody. */
+function assertSameAccount(id: string | null): void {
+  if ((activeAccount?.id ?? null) !== id) throw new DOMException('Account changed', 'AbortError');
+}
+
 interface JwtClaims {
   sub: string;
-  deviceId: string;
+  username: string;
   role: UserRole;
+  accessLevel: AccessLevel;
   exp: number;
 }
 
@@ -53,7 +78,9 @@ export function setAccessToken(token: string | null): void {
 /** Who the current access token says we are. Display only; the server enforces roles. */
 export function currentUser(): SessionUser | null {
   const claims = accessToken ? decodeClaims(accessToken) : null;
-  return claims ? { id: claims.sub, deviceId: claims.deviceId, role: claims.role } : null;
+  return claims
+    ? { id: claims.sub, username: claims.username, role: claims.role, accessLevel: claims.accessLevel }
+    : null;
 }
 
 export function onSessionLost(handler: () => void): void {
@@ -69,36 +96,43 @@ function tokenExpiresWithin(ms: number): boolean {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   query?: Record<string, string | number | undefined | null>;
   body?: unknown;
-  /** False for login/register/refresh, which carry no bearer token. */
+  /** False for login, setup, invites and refresh, which carry no bearer token. */
   auth?: boolean;
+  headers?: Record<string, string>;
+  /** Server to call instead of the active account's: signing in before an account exists. */
+  serverUrl?: string;
   signal?: AbortSignal;
 }
 
-function buildUrl(path: string, query?: RequestOptions['query']): string {
+function buildUrl(base: string, path: string, query?: RequestOptions['query']): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value !== undefined && value !== null) params.set(key, String(value));
   }
   const qs = params.toString();
-  return `${API_BASE}${path}${qs ? `?${qs}` : ''}`;
+  return `${base}${path}${qs ? `?${qs}` : ''}`;
 }
 
 async function send(path: string, opts: RequestOptions, withAuth: boolean): Promise<Response> {
-  const headers: Record<string, string> = { Accept: 'application/json', 'X-Client': 'web' };
+  const headers: Record<string, string> = { Accept: 'application/json', ...opts.headers };
+  // `X-Client: web` asks the server for the cookie flow, which only works same-origin.
+  // Without it the server exchanges the refresh token in the body, as it does for the app.
+  if (!MULTI_SERVER) headers['X-Client'] = 'web';
+  const base = opts.serverUrl ? apiBaseOf(opts.serverUrl) : currentBase();
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   if (withAuth && accessToken) headers.Authorization = `Bearer ${accessToken}`;
 
   for (let attempt = 0; ; attempt++) {
     let response: Response;
     try {
-      response = await fetch(buildUrl(path, opts.query), {
+      response = await fetch(buildUrl(base, path, opts.query), {
         method: opts.method ?? 'GET',
         headers,
         body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-        credentials: 'include',
+        credentials: MULTI_SERVER ? 'omit' : 'include',
         cache: 'no-store',
         signal: opts.signal,
       });
@@ -136,7 +170,7 @@ async function unwrap<T>(response: Response): Promise<T> {
   return json.data;
 }
 
-let refreshInFlight: Promise<boolean> | null = null;
+let refreshInFlight: { accountId: string | null; promise: Promise<boolean> } | null = null;
 
 async function doRefresh(): Promise<boolean> {
   const response = await send('/auth/refresh', { method: 'POST', body: {} }, false);
@@ -153,6 +187,30 @@ async function doRefresh(): Promise<boolean> {
 }
 
 /**
+ * Multi-server refresh: exchange the account's stored refresh token. The token is
+ * read here, inside the lock, so a tab that waited its turn presents the token the
+ * previous tab was just given rather than the one that tab used up.
+ */
+async function doAccountRefresh(account: { id: string; apiBase: string }): Promise<boolean> {
+  const refreshToken = accounts.refreshToken(account.id);
+  if (!refreshToken) return false;
+
+  const response = await send('/auth/refresh', { method: 'POST', body: { refreshToken } }, false);
+  if (response.ok) {
+    const { data } = (await response.json()) as { data: RefreshResponse & { refreshToken: string } };
+    accounts.setRefreshToken(account.id, data.refreshToken);
+    if (activeAccount?.id === account.id) accessToken = data.accessToken;
+    return true;
+  }
+  if (response.status === 401 || response.status === 403) {
+    accounts.setRefreshToken(account.id, null);
+    if (activeAccount?.id === account.id) accessToken = null;
+    return false;
+  }
+  throw await toError(response);
+}
+
+/**
  * Exchange the refresh cookie for a new access token.
  * Resolves false when the server says the session is over; throws on network failure
  * so being offline never signs anyone out.
@@ -161,16 +219,25 @@ async function doRefresh(): Promise<boolean> {
  * them present an already-used token. A Web Lock makes tabs take turns.
  */
 export function refreshSession(): Promise<boolean> {
-  if (!refreshInFlight) {
-    const run = () => doRefresh();
+  const account = activeAccount;
+  const accountId = account?.id ?? null;
+  if (MULTI_SERVER && !account) return Promise.resolve(false);
+
+  if (!refreshInFlight || refreshInFlight.accountId !== accountId) {
+    const run = () => (account ? doAccountRefresh(account) : doRefresh());
+    const lockName = account ? `${REFRESH_LOCK}:${account.id}` : REFRESH_LOCK;
     const locked: Promise<boolean> = navigator.locks
-      ? (navigator.locks.request(REFRESH_LOCK, run) as Promise<boolean>)
+      ? (navigator.locks.request(lockName, run) as Promise<boolean>)
       : run();
-    refreshInFlight = locked.finally(() => {
-      refreshInFlight = null;
-    });
+    const entry = {
+      accountId,
+      promise: locked.finally(() => {
+        if (refreshInFlight === entry) refreshInFlight = null;
+      }),
+    };
+    refreshInFlight = entry;
   }
-  return refreshInFlight;
+  return refreshInFlight.promise;
 }
 
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
@@ -179,9 +246,14 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
     return unwrap<T>(await send(path, opts, false));
   }
 
+  // Every await below may span an account switch; the request then stops rather
+  // than go out to the new account's server with the new account's token.
+  const accountId = activeAccount?.id ?? null;
+
   // Refresh ahead of expiry rather than spending a request on a guaranteed 401
   if (tokenExpiresWithin(20_000)) {
     const ok = await refreshSession();
+    assertSameAccount(accountId);
     if (!ok) {
       sessionLostHandler?.();
       throw new ApiError(401, 'Session expired');
@@ -189,13 +261,16 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
   }
 
   let response = await send(path, opts, true);
+  assertSameAccount(accountId);
   if (response.status === 401) {
     const ok = await refreshSession();
+    assertSameAccount(accountId);
     if (!ok) {
       sessionLostHandler?.();
       throw new ApiError(401, 'Session expired');
     }
     response = await send(path, opts, true);
+    assertSameAccount(accountId);
     if (response.status === 401) {
       sessionLostHandler?.();
     }

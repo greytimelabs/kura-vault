@@ -1,34 +1,70 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../core/crypto/aad.dart';
 import '../../core/crypto/crypto_service.dart';
+import '../../core/crypto/identity_crypto.dart';
 import '../../core/crypto/key_derivation.dart';
 import '../../core/crypto/cache_crypto.dart';
+import '../../core/crypto/models.dart';
 import 'vault_crypto_state.dart';
 
-/// A vault whose verification token decrypted under the entered passphrase.
+export '../../core/crypto/models.dart';
+
+/// A vault this account created whose passphrase matched.
 ///
-/// Holds a live KEK. Every MatchedVault returned by [VaultCryptoCubit.findMatches]
-/// must eventually be either committed via [VaultCryptoCubit.selectVault] or
-/// zeroed via [VaultCryptoCubit.discardMatches] — never simply dropped.
+/// Holds a live vault key. Every MatchedVault returned by
+/// [VaultCryptoCubit.findMatches] must eventually be either committed via
+/// [VaultCryptoCubit.selectVault] or zeroed via
+/// [VaultCryptoCubit.discardMatches] — never simply dropped.
 class MatchedVault {
   final String vaultId;
-  final Uint8List kek;
+  final Uint8List key;
 
   /// Decrypted vault label, or a neutral positional fallback ("Vault 1")
   /// when the vault has no label. Never the vault UUID: that is a stable
-  /// identifier an observer could correlate against the database or GET /vaults.
+  /// identifier an observer could correlate against the database.
   final String label;
 
   MatchedVault({
     required this.vaultId,
-    required this.kek,
+    required this.key,
     required this.label,
   });
 }
 
-/// Manages vault encryption state.
-/// KEK and cache key live here in memory only.
+class _Identity {
+  final String userId;
+  final Uint8List encSk;
+  final Uint8List signSk;
+  final Uint8List encPk;
+  final Uint8List signPk;
+
+  /// The trust root: other users' keys count only when certified by this key.
+  final Uint8List ownerSignPk;
+
+  _Identity({
+    required this.userId,
+    required this.encSk,
+    required this.signSk,
+    required this.encPk,
+    required this.signPk,
+    required this.ownerSignPk,
+  });
+}
+
+/// The server reports public keys for this account that its private keys do
+/// not belong to. Others would be sealing to a key this user cannot open, or
+/// to someone else's.
+class KeysNotYoursException implements Exception {
+  @override
+  String toString() =>
+      'The server reports keys that are not yours. Do not continue; contact the server owner.';
+}
+
+/// Every key this app holds, and everything done with them: the account's
+/// private keys, the key of each open vault, album keys. All of it lives here
+/// in memory only and is zeroed by [lock].
 class VaultCryptoCubit extends Cubit<VaultCryptoState> {
   VaultCryptoCubit() : super(const VaultCryptoState());
 
@@ -37,176 +73,591 @@ class VaultCryptoCubit extends Cubit<VaultCryptoState> {
   /// at N * 64MB.
   static const int _maxConcurrentDerivations = 4;
 
-  /// Derive a candidate KEK for EVERY vault and return all that verify.
+  _Identity? _identity;
+  final Map<String, Uint8List> _vaultKeys = {};
+  final Map<String, Uint8List> _albumKeys = {};
+
+  /// Which vault an album key was reached through, so closing the vault drops it.
+  final Map<String, String> _albumVault = {};
+
+  _Identity get _me {
+    final identity = _identity;
+    if (identity == null) throw StateError('Account is locked');
+    return identity;
+  }
+
+  Uint8List _vaultKey(String vaultId) {
+    final key = _vaultKeys[vaultId];
+    if (key == null) throw StateError('Vault is locked');
+    return key;
+  }
+
+  Uint8List _albumKey(String albumId) {
+    final key = _albumKeys[albumId];
+    if (key == null) throw StateError('Album key is not loaded');
+    return key;
+  }
+
+  // ── Account ──
+
+  /// Generate a new user's keys and encrypt the private half under the master
+  /// passphrase. Without [invite] this is the server owner, who certifies
+  /// themselves; with it, the new user proves their keys to the owner through
+  /// the link's secret and takes the owner's key from the link as trust root.
+  Future<AccountMaterial> createAccount({
+    required String userId,
+    required String username,
+    required String passphrase,
+    InviteLink? invite,
+  }) async {
+    final encSk = CryptoService.generateKey();
+    final signSk = CryptoService.generateKey();
+    final encPk = await IdentityCrypto.encPublicOf(encSk);
+    final signPk = await IdentityCrypto.signPublicOf(signSk);
+    final ownerSignPk = invite != null ? b64d(invite.ownerSignKey) : signPk;
+
+    final salt = KeyDerivation.generateSalt();
+    final masterKey =
+        await KeyDerivation.deriveKek(passphrase: passphrase, salt: salt);
+    final bundle = IdentityCrypto.encryptBundle(
+      masterKey: masterKey,
+      userId: userId,
+      encSk: encSk,
+      signSk: signSk,
+      ownerSignPk: ownerSignPk,
+    );
+    CryptoService.zero(masterKey);
+
+    lock();
+    _identity = _Identity(
+      userId: userId,
+      encSk: encSk,
+      signSk: signSk,
+      encPk: encPk,
+      signPk: signPk,
+      ownerSignPk: ownerSignPk,
+    );
+    emit(const VaultCryptoState(accountUnlocked: true));
+
+    final keys = UserKeys(
+      userId: userId,
+      username: username,
+      publicEncKey: b64e(encPk),
+      publicSignKey: b64e(signPk),
+    );
+    return AccountMaterial(
+      kdfSalt: b64e(salt),
+      encryptedPrivateKeys: bundle.encrypted,
+      privateKeysNonce: bundle.nonce,
+      publicEncKey: keys.publicEncKey,
+      publicSignKey: keys.publicSignKey,
+      keyCert: invite == null ? await IdentityCrypto.signCert(signSk, keys) : null,
+      keyBinding: invite == null
+          ? null
+          : b64e(await IdentityCrypto.inviteBinding(b64d(invite.secret), keys)),
+    );
+  }
+
+  /// Load the account's private keys with the master passphrase. False means
+  /// a wrong passphrase. Throws [KeysNotYoursException] when the public keys
+  /// the server reports are not the ones these private keys belong to.
+  Future<bool> unlockAccount({
+    required AccountKeys account,
+    required String passphrase,
+  }) async {
+    final masterKey = await KeyDerivation.deriveKek(
+      passphrase: passphrase,
+      salt: b64d(account.kdfSalt),
+    );
+    final ({Uint8List encSk, Uint8List signSk, Uint8List ownerSignPk}) bundle;
+    try {
+      bundle = IdentityCrypto.decryptBundle(
+        masterKey: masterKey,
+        userId: account.id,
+        encrypted: account.encryptedPrivateKeys,
+        nonce: account.privateKeysNonce,
+      );
+    } catch (_) {
+      return false;
+    } finally {
+      CryptoService.zero(masterKey);
+    }
+
+    final encPk = await IdentityCrypto.encPublicOf(bundle.encSk);
+    final signPk = await IdentityCrypto.signPublicOf(bundle.signSk);
+    if (b64e(encPk) != account.publicEncKey ||
+        b64e(signPk) != account.publicSignKey) {
+      CryptoService.zero(bundle.encSk);
+      CryptoService.zero(bundle.signSk);
+      throw KeysNotYoursException();
+    }
+
+    lock();
+    _identity = _Identity(
+      userId: account.id,
+      encSk: bundle.encSk,
+      signSk: bundle.signSk,
+      encPk: encPk,
+      signPk: signPk,
+      ownerSignPk: bundle.ownerSignPk,
+    );
+    emit(const VaultCryptoState(accountUnlocked: true));
+    return true;
+  }
+
+  /// True when the owner this account trusts is the account itself.
+  bool get isTrustRoot =>
+      IdentityCrypto.equalBytes(_me.signPk, _me.ownerSignPk);
+
+  // ── Vaults ──
+
+  /// Try the passphrase against EVERY vault this account created and return
+  /// all that open.
   ///
-  /// Because each vault has a distinct random salt, the same passphrase derives
-  /// a different KEK per vault — so one passphrase can legitimately match more
-  /// than one vault. That is not a cryptographic collision; each match is
-  /// verified independently against its own vault UUID.
+  /// Each vault has its own random salt, so one passphrase can legitimately
+  /// open more than one. There is deliberately NO early exit: a full scan
+  /// means unlock latency does not reveal which vault matched, or how many.
   ///
-  /// There is deliberately NO early exit. Beyond being required to find every
-  /// match, a full scan means unlock latency does not reveal which vault matched.
-  ///
-  /// Returns matches in [vaults] order (stable, mirrors the API's sortOrder).
-  /// An empty list means the passphrase was wrong.
+  /// Returns matches in [vaults] order. An empty list means the passphrase
+  /// was wrong.
   Future<List<MatchedVault>> findMatches({
     required String passphrase,
     required List<VaultInfo> vaults,
   }) async {
+    final me = _me;
+    final own = vaults.where((v) => v.isCreator && v.kdfSalt != null).toList();
     final matches = <MatchedVault>[];
 
-    for (var i = 0; i < vaults.length; i += _maxConcurrentDerivations) {
-      final batch = vaults.skip(i).take(_maxConcurrentDerivations).toList();
+    for (var i = 0; i < own.length; i += _maxConcurrentDerivations) {
+      final batch = own.skip(i).take(_maxConcurrentDerivations).toList();
 
-      final keks = await Future.wait(
-        batch.map(
-          (v) => KeyDerivation.deriveKek(
+      final keys = await Future.wait(batch.map((v) async {
+        try {
+          // Outer layer: sealed to this account. Inner: the vault passphrase.
+          final inner = await IdentityCrypto.open(
+            encSk: me.encSk,
+            encPk: me.encPk,
+            sealed: b64d(v.wrappedKey),
+            aad: Aad.vaultKey(v.id, me.userId),
+          );
+          final passphraseKey = await KeyDerivation.deriveKek(
             passphrase: passphrase,
-            salt: _base64ToBytes(v.kekSalt),
-          ),
-        ),
-      );
+            salt: b64d(v.kdfSalt!),
+          );
+          try {
+            final key = CryptoService.decrypt(
+              ciphertext: inner.sublist(12),
+              key: passphraseKey,
+              iv: inner.sublist(0, 12),
+              aad: Aad.vaultKeyPassphrase(v.id, me.userId),
+            );
+            return key.length == 32 ? key : null;
+          } finally {
+            CryptoService.zero(passphraseKey);
+          }
+        } catch (_) {
+          return null; // wrong passphrase, or not sealed to this account
+        }
+      }));
 
       for (var j = 0; j < batch.length; j++) {
+        final key = keys[j];
+        if (key == null) continue;
         final vault = batch[j];
-        final kek = keks[j];
-
-        final isMatch = CryptoService.verifyKek(
-          kek: kek,
-          kekVerify: _base64ToBytes(vault.kekVerify),
-          kekVerifyNonce: _base64ToBytes(vault.kekVerifyNonce),
-          expectedVaultId: vault.id,
-        );
-
-        if (isMatch) {
-          matches.add(MatchedVault(
-            vaultId: vault.id,
-            kek: kek,
-            label: decryptLabel(vault, kek) ?? 'Vault ${matches.length + 1}',
-          ));
-        } else {
-          // Zero non-matching candidate KEKs immediately rather than
-          // leaving them for the GC.
-          _zero(kek);
-        }
+        matches.add(MatchedVault(
+          vaultId: vault.id,
+          key: key,
+          label: _decryptText(vault.labelEncrypted, vault.labelNonce, key,
+                  Aad.vaultLabel(vault.id)) ??
+              'Vault ${matches.length + 1}',
+        ));
       }
     }
 
     return matches;
   }
 
-  /// Decrypt a vault's label with its KEK. Returns null when the vault has no
-  /// label or the ciphertext fails to decrypt.
-  String? decryptLabel(VaultInfo vault, Uint8List kek) {
-    final labelEncrypted = vault.labelEncrypted;
-    final labelNonce = vault.labelNonce;
-    if (labelEncrypted == null || labelNonce == null) return null;
+  /// Commit [chosen] as the open vault and zero the keys of every other match.
+  void selectVault(MatchedVault chosen, List<MatchedVault> allMatches) {
+    for (final m in allMatches) {
+      if (!identical(m, chosen)) CryptoService.zero(m.key);
+    }
+    _vaultKeys[chosen.vaultId] = chosen.key;
+    emit(VaultCryptoState(
+      accountUnlocked: true,
+      activeVaultId: chosen.vaultId,
+      activeLabel: chosen.label,
+      canWrite: true,
+      isCreator: true,
+      cacheKey: CacheCrypto.deriveCacheKey(chosen.key),
+    ));
+  }
 
+  /// Zero every match without opening one. Call this whenever the picker is
+  /// dismissed, so live keys are never stranded in memory.
+  void discardMatches(List<MatchedVault> matches) {
+    for (final m in matches) {
+      CryptoService.zero(m.key);
+    }
+  }
+
+  Future<void> _requireGrant(String kind, String resourceId, UserKeys? granter,
+      String? signature, Uint8List sealed) async {
+    final me = _me;
+    if (granter == null || signature == null) {
+      throw StateError('Unsigned share');
+    }
+    if (!await IdentityCrypto.verifyCert(me.ownerSignPk, granter)) {
+      throw StateError('Unverified sharer');
+    }
+    final ok = await IdentityCrypto.verifyGrant(
+      granterSignPk: b64d(granter.publicSignKey),
+      signature: signature,
+      kind: kind,
+      resourceId: resourceId,
+      recipientId: me.userId,
+      granterId: granter.userId,
+      sealed: sealed,
+    );
+    if (!ok) throw StateError('Share was not issued by its stated sender');
+  }
+
+  /// Open everything other people shared with this account. A share is used
+  /// only if its sender's keys are certified by the owner and they signed
+  /// this exact sealed key; anything else (a key the server made up, say) is
+  /// left out.
+  Future<List<SharedSpace>> openShared({
+    required List<VaultInfo> vaults,
+    required List<SharedAlbumInfo> albums,
+  }) async {
+    final me = _me;
+    final spaces = <SharedSpace>[];
+    final sharedVaultIds = <String>{};
+
+    for (final vault in vaults.where((v) => !v.isCreator)) {
+      try {
+        final sealed = b64d(vault.wrappedKey);
+        await _requireGrant('vault', vault.id, vault.granter, vault.grantSig, sealed);
+        final key = await IdentityCrypto.open(
+          encSk: me.encSk,
+          encPk: me.encPk,
+          sealed: sealed,
+          aad: Aad.vaultKey(vault.id, me.userId),
+        );
+        _vaultKeys[vault.id] = key;
+        sharedVaultIds.add(vault.id);
+        spaces.add(SharedSpace(
+          kind: 'vault',
+          id: vault.id,
+          vaultId: vault.id,
+          label: _decryptText(vault.labelEncrypted, vault.labelNonce, key,
+                  Aad.vaultLabel(vault.id)) ??
+              'Shared vault',
+          permission: vault.permission,
+          sharedBy: vault.granter?.username ?? '',
+        ));
+      } catch (_) {
+        // not usable: skipped
+      }
+    }
+
+    for (final album in albums) {
+      try {
+        final sealed = b64d(album.wrappedKey);
+        await _requireGrant('album', album.id, album.granter, album.grantSig, sealed);
+        final key = await IdentityCrypto.open(
+          encSk: me.encSk,
+          encPk: me.encPk,
+          sealed: sealed,
+          aad: Aad.albumKeyGrant(album.id, me.userId),
+        );
+        _albumKeys[album.id] = key;
+        // An album inside a vault that is shared as a whole is reached through the vault
+        if (sharedVaultIds.contains(album.vaultId)) continue;
+        spaces.add(SharedSpace(
+          kind: 'album',
+          id: album.id,
+          vaultId: album.vaultId,
+          label: _decryptText(album.nameEncrypted, album.nameNonce, key,
+                  Aad.albumName(album.id)) ??
+              'Shared album',
+          permission: album.permission,
+          sharedBy: album.granter?.username ?? '',
+        ));
+      } catch (_) {
+        // not usable: skipped
+      }
+    }
+    return spaces;
+  }
+
+  /// Open something from [openShared]. Its key is already loaded.
+  void openSpace(SharedSpace space) {
+    final key = space.isAlbum ? _albumKey(space.id) : _vaultKey(space.vaultId);
+    emit(VaultCryptoState(
+      accountUnlocked: true,
+      activeVaultId: space.vaultId,
+      activeLabel: space.label,
+      albumOnlyId: space.isAlbum ? space.id : null,
+      canWrite: space.canWrite,
+      isCreator: false,
+      cacheKey: CacheCrypto.deriveCacheKey(key),
+    ));
+  }
+
+  /// Leave the open vault but stay unlocked. A vault opened with its
+  /// passphrase needs it again; what was shared stays one tap away.
+  void closeVault() {
+    final vaultId = state.activeVaultId;
+    if (vaultId != null && state.isCreator) {
+      final key = _vaultKeys.remove(vaultId);
+      if (key != null) CryptoService.zero(key);
+      for (final albumId in _albumVault.keys
+          .where((id) => _albumVault[id] == vaultId)
+          .toList()) {
+        final albumKey = _albumKeys.remove(albumId);
+        if (albumKey != null) CryptoService.zero(albumKey);
+        _albumVault.remove(albumId);
+      }
+    }
+    if (state.cacheKey != null) CryptoService.zero(state.cacheKey!);
+    emit(VaultCryptoState(accountUnlocked: _identity != null));
+  }
+
+  /// Lock - wipe every secret from memory.
+  void lock() {
+    final identity = _identity;
+    if (identity != null) {
+      CryptoService.zero(identity.encSk);
+      CryptoService.zero(identity.signSk);
+    }
+    _identity = null;
+    for (final key in _vaultKeys.values) {
+      CryptoService.zero(key);
+    }
+    for (final key in _albumKeys.values) {
+      CryptoService.zero(key);
+    }
+    _vaultKeys.clear();
+    _albumKeys.clear();
+    _albumVault.clear();
+    if (state.cacheKey != null) CryptoService.zero(state.cacheKey!);
+    if (!isClosed) emit(const VaultCryptoState());
+  }
+
+  // ── Albums ──
+
+  /// Load the keys of a vault's albums through the vault key and return their
+  /// names by album id. An album with no key (Liked) is left out.
+  Map<String, String> openAlbums(
+    String vaultId,
+    Iterable<
+            ({
+              String id,
+              String? keyWrapped,
+              String? keyNonce,
+              String? nameEncrypted,
+              String? nameNonce
+            })>
+        albums,
+  ) {
+    final vaultKey = _vaultKeys[vaultId];
+    final names = <String, String>{};
+    for (final album in albums) {
+      try {
+        var key = _albumKeys[album.id];
+        if (key == null) {
+          if (vaultKey == null || album.keyWrapped == null || album.keyNonce == null) {
+            continue;
+          }
+          key = CryptoService.unwrapKey(
+            wrapped: b64d(album.keyWrapped!),
+            wrappingKey: vaultKey,
+            nonce: b64d(album.keyNonce!),
+            aad: Aad.albumKey(album.id, vaultId),
+          );
+          _albumKeys[album.id] = key;
+          _albumVault[album.id] = vaultId;
+        }
+        final name = _decryptText(
+            album.nameEncrypted, album.nameNonce, key, Aad.albumName(album.id));
+        if (name != null) names[album.id] = name;
+      } catch (_) {
+        // an album this account cannot open: it shows without a name
+      }
+    }
+    return names;
+  }
+
+  bool hasAlbumKey(String albumId) => _albumKeys.containsKey(albumId);
+
+  // ── Media ──
+
+  Uint8List _mediaKey(String mediaId, MediaKeyRef ref) {
+    return ref.scope == 'vault'
+        ? CryptoService.unwrapKey(
+            wrapped: b64d(ref.wrapped),
+            wrappingKey: _vaultKey(ref.vaultId),
+            nonce: b64d(ref.nonce),
+            aad: Aad.mediaKeyVault(mediaId, ref.vaultId),
+          )
+        : CryptoService.unwrapKey(
+            wrapped: b64d(ref.wrapped),
+            wrappingKey: _albumKey(ref.albumId!),
+            nonce: b64d(ref.nonce),
+            aad: Aad.mediaKeyAlbum(mediaId, ref.albumId!),
+          );
+  }
+
+  /// Unwrap an item's key and decrypt one of its tiers (`thumb`, `preview`
+  /// or `original`).
+  Uint8List decryptMedia({
+    required String mediaId,
+    required String tier,
+    required MediaKeyRef key,
+    required String ivB64,
+    required Uint8List encryptedBlob,
+  }) {
+    final mediaKey = _mediaKey(mediaId, key);
     try {
-      final plaintext = CryptoService.decrypt(
-        ciphertext: _base64ToBytes(labelEncrypted),
-        key: kek,
-        iv: _base64ToBytes(labelNonce),
+      return CryptoService.decrypt(
+        ciphertext: encryptedBlob,
+        key: mediaKey,
+        iv: b64d(ivB64),
+        aad: Aad.mediaBlob(mediaId, tier),
       );
-      final label = utf8.decode(plaintext).trim();
-      return label.isEmpty ? null : label;
+    } finally {
+      // Zero the item's key immediately
+      CryptoService.zero(mediaKey);
+    }
+  }
+
+  // ── Users and sharing ──
+
+  /// True when the owner this account trusts certified exactly these keys for
+  /// this user.
+  Future<bool> verifyUser(UserKeys user) =>
+      IdentityCrypto.verifyCert(_me.ownerSignPk, user);
+
+  /// Start an invitation. The secret goes into the link and nowhere else: the
+  /// server gets a hash of a token derived from it, and a copy sealed to the
+  /// owner so their client can check the invitee's keys later.
+  Future<
+      ({
+        String secret,
+        String tokenHash,
+        String ownerSecretEncrypted,
+        String ownerSignKey
+      })> createInvite(String inviteId) async {
+    final me = _me;
+    final secret = CryptoService.randomBytes(32);
+    try {
+      final token = await IdentityCrypto.inviteAuthToken(secret);
+      final hash = await IdentityCrypto.sha256(token);
+      return (
+        secret: b64e(secret),
+        tokenHash: hash.map((b) => b.toRadixString(16).padLeft(2, '0')).join(),
+        ownerSecretEncrypted: b64e(await IdentityCrypto.seal(
+          recipientPk: me.encPk,
+          plaintext: secret,
+          aad: Aad.inviteSecret(inviteId),
+        )),
+        ownerSignKey: b64e(me.signPk),
+      );
+    } finally {
+      CryptoService.zero(secret);
+    }
+  }
+
+  /// Sign a new user's keys, but only if they are the keys the invitee bound
+  /// with the link's secret. Null means they are not: the server (or someone
+  /// on the path) replaced them, and nothing must be shared with that account.
+  Future<String?> certifyUser({
+    required UserKeys user,
+    required String inviteId,
+    required String ownerSecretEncrypted,
+    required String keyBinding,
+  }) async {
+    final me = _me;
+    final Uint8List secret;
+    try {
+      secret = await IdentityCrypto.open(
+        encSk: me.encSk,
+        encPk: me.encPk,
+        sealed: b64d(ownerSecretEncrypted),
+        aad: Aad.inviteSecret(inviteId),
+      );
+    } catch (_) {
+      return null;
+    }
+    try {
+      final expected = await IdentityCrypto.inviteBinding(secret, user);
+      final Uint8List presented;
+      try {
+        presented = b64d(keyBinding);
+      } catch (_) {
+        return null;
+      }
+      if (!IdentityCrypto.equalBytes(expected, presented)) return null;
+      return await IdentityCrypto.signCert(me.signSk, user);
+    } finally {
+      CryptoService.zero(secret);
+    }
+  }
+
+  Future<({String wrappedKey, String grantSig})> _share(
+      String kind, String resourceId, Uint8List key, Uint8List aad, UserKeys recipient) async {
+    final me = _me;
+    if (!await verifyUser(recipient)) {
+      throw StateError(
+          'The keys for ${recipient.username} could not be verified. Nothing was shared.');
+    }
+    final sealed = await IdentityCrypto.seal(
+      recipientPk: b64d(recipient.publicEncKey),
+      plaintext: key,
+      aad: aad,
+    );
+    return (
+      wrappedKey: b64e(sealed),
+      grantSig: await IdentityCrypto.signGrant(
+        signSk: me.signSk,
+        kind: kind,
+        resourceId: resourceId,
+        recipientId: recipient.userId,
+        granterId: me.userId,
+        sealed: sealed,
+      ),
+    );
+  }
+
+  /// Seal an open vault's key to another user, after checking the owner
+  /// certified their keys. The vault passphrase is never shared.
+  Future<({String wrappedKey, String grantSig})> shareVault({
+    required String vaultId,
+    required UserKeys recipient,
+  }) =>
+      _share('vault', vaultId, _vaultKey(vaultId),
+          Aad.vaultKey(vaultId, recipient.userId), recipient);
+
+  Future<({String wrappedKey, String grantSig})> shareAlbum({
+    required String albumId,
+    required UserKeys recipient,
+  }) =>
+      _share('album', albumId, _albumKey(albumId),
+          Aad.albumKeyGrant(albumId, recipient.userId), recipient);
+
+  /// Null when there is nothing to decrypt or the ciphertext does not verify.
+  static String? _decryptText(
+      String? encrypted, String? nonce, Uint8List key, Uint8List aad) {
+    if (encrypted == null || nonce == null) return null;
+    try {
+      final text = utf8
+          .decode(CryptoService.decrypt(
+              ciphertext: b64d(encrypted), key: key, iv: b64d(nonce), aad: aad))
+          .trim();
+      return text.isEmpty ? null : text;
     } catch (_) {
       return null;
     }
   }
-
-  /// Commit [chosen] as the active vault and zero the KEKs of every other match.
-  void selectVault(MatchedVault chosen, List<MatchedVault> allMatches) {
-    for (final m in allMatches) {
-      if (!identical(m, chosen)) _zero(m.kek);
-    }
-
-    emit(VaultCryptoState(
-      activeVaultId: chosen.vaultId,
-      kek: chosen.kek,
-      cacheKey: CacheCrypto.deriveCacheKey(chosen.kek),
-      isUnlocked: true,
-    ));
-  }
-
-  /// Zero every match without unlocking. Call this whenever the picker is
-  /// dismissed, so live KEKs are never stranded in memory.
-  void discardMatches(List<MatchedVault> matches) {
-    for (final m in matches) {
-      _zero(m.kek);
-    }
-  }
-
-  /// Lock the vault - wipe all secrets from memory.
-  void lock() {
-    if (state.kek != null) {
-      _zero(state.kek!);
-    }
-    if (state.cacheKey != null) {
-      _zero(state.cacheKey!);
-    }
-    emit(const VaultCryptoState());
-  }
-
-  /// Decrypt a photo's DEK and then decrypt the photo.
-  Uint8List decryptMedia({
-    required Uint8List encryptedBlob,
-    required String encryptedDekB64,
-    required String dekNonceB64,
-    required String ivB64,
-  }) {
-    if (!state.isUnlocked || state.kek == null) {
-      throw StateError('Vault is locked');
-    }
-
-    final dek = CryptoService.unwrapDek(
-      encryptedDek: _base64ToBytes(encryptedDekB64),
-      kek: state.kek!,
-      nonce: _base64ToBytes(dekNonceB64),
-    );
-
-    final plaintext = CryptoService.decrypt(
-      ciphertext: encryptedBlob,
-      key: dek,
-      iv: _base64ToBytes(ivB64),
-    );
-
-    // Zero DEK immediately
-    _zero(dek);
-
-    return plaintext;
-  }
-
-  static void _zero(Uint8List bytes) => bytes.fillRange(0, bytes.length, 0);
-
-  Uint8List _base64ToBytes(String b64) =>
-      Uint8List.fromList(base64.decode(b64));
-}
-
-/// Simple data class for vault info from API.
-class VaultInfo {
-  final String id;
-  final String kekSalt;
-  final String kekVerify;
-  final String kekVerifyNonce;
-  final String? labelEncrypted;
-  final String? labelNonce;
-
-  VaultInfo({
-    required this.id,
-    required this.kekSalt,
-    required this.kekVerify,
-    required this.kekVerifyNonce,
-    this.labelEncrypted,
-    this.labelNonce,
-  });
-
-  factory VaultInfo.fromJson(Map<String, dynamic> json) => VaultInfo(
-        id: json['id'] as String,
-        kekSalt: json['kekSalt'] as String,
-        kekVerify: json['kekVerify'] as String,
-        kekVerifyNonce: json['kekVerifyNonce'] as String,
-        labelEncrypted: json['labelEncrypted'] as String?,
-        labelNonce: json['labelNonce'] as String?,
-      );
 }

@@ -5,7 +5,10 @@ import tailwindcss from '@tailwindcss/vite';
 
 // Where encrypted blobs are fetched from. Narrow this to the bucket's exact origin in production
 // (for Cloudflare R2: https://<account-id>.r2.cloudflarestorage.com).
-const s3Origin = process.env.VITE_S3_ORIGIN ?? 'https://*.amazonaws.com';
+// The multi-server build (VITE_MULTI_SERVER=true, see src/lib/config.ts) talks to servers and
+// buckets it cannot know in advance, so there the default is any https origin.
+const multiServer = process.env.VITE_MULTI_SERVER === 'true';
+const s3Origin = process.env.VITE_S3_ORIGIN ?? (multiServer ? 'https:' : 'https://*.amazonaws.com');
 
 export const contentSecurityPolicy = [
   "default-src 'none'",

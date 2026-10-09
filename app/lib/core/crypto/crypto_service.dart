@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:pointycastle/pointycastle.dart';
 import 'package:pointycastle/block/aes.dart';
@@ -7,31 +7,40 @@ import 'package:pointycastle/block/modes/gcm.dart';
 /// Core AES-256-GCM encryption/decryption service.
 /// All operations are in-memory only.
 class CryptoService {
-  /// Generate a cryptographically secure random DEK (32 bytes).
-  static Uint8List generateDek() {
-    final secureRandom = _getSecureRandom();
-    return secureRandom.nextBytes(32);
+  // The operating system's CSPRNG. Every key and IV this app generates comes
+  // from here; nothing is ever seeded from the clock.
+  static final Random _random = Random.secure();
+
+  /// Cryptographically secure random bytes.
+  static Uint8List randomBytes(int length) {
+    final out = Uint8List(length);
+    for (var i = 0; i < length; i++) {
+      out[i] = _random.nextInt(256);
+    }
+    return out;
   }
 
+  /// Generate a random 32-byte key.
+  static Uint8List generateKey() => randomBytes(32);
+
   /// Generate a random IV/nonce (12 bytes for GCM).
-  static Uint8List generateIv() {
-    final secureRandom = _getSecureRandom();
-    return secureRandom.nextBytes(12);
-  }
+  static Uint8List generateIv() => randomBytes(12);
 
   /// Encrypt data with AES-256-GCM.
   /// Returns: encrypted bytes with 16-byte auth tag appended.
+  /// [aad] binds the ciphertext to the ids it belongs to (see aad.dart).
   static Uint8List encrypt({
     required Uint8List plaintext,
     required Uint8List key,
     required Uint8List iv,
+    Uint8List? aad,
   }) {
     final cipher = GCMBlockCipher(AESEngine());
     final params = AEADParameters(
       KeyParameter(key),
       128, // tag length in bits
       iv,
-      Uint8List(0), // no additional authenticated data
+      aad ?? Uint8List(0),
     );
     cipher.init(true, params); // true = encrypt
 
@@ -46,18 +55,19 @@ class CryptoService {
 
   /// Decrypt data with AES-256-GCM.
   /// Input: encrypted bytes with 16-byte auth tag appended.
-  /// Throws if auth tag verification fails (data tampered).
+  /// Throws if the key or [aad] is wrong, or the data was tampered with.
   static Uint8List decrypt({
     required Uint8List ciphertext,
     required Uint8List key,
     required Uint8List iv,
+    Uint8List? aad,
   }) {
     final cipher = GCMBlockCipher(AESEngine());
     final params = AEADParameters(
       KeyParameter(key),
       128,
       iv,
-      Uint8List(0),
+      aad ?? Uint8List(0),
     );
     cipher.init(false, params); // false = decrypt
 
@@ -70,51 +80,27 @@ class CryptoService {
     return output.sublist(0, offset);
   }
 
-  /// Encrypt a DEK with the vault's KEK (envelope encryption).
-  static ({Uint8List encryptedDek, Uint8List nonce}) wrapDek({
-    required Uint8List dek,
-    required Uint8List kek,
+  /// Wrap one key under another (envelope encryption).
+  static ({Uint8List wrapped, Uint8List nonce}) wrapKey({
+    required Uint8List key,
+    required Uint8List wrappingKey,
+    required Uint8List aad,
   }) {
     final nonce = generateIv();
-    final encrypted = encrypt(plaintext: dek, key: kek, iv: nonce);
-    return (encryptedDek: encrypted, nonce: nonce);
+    final wrapped = encrypt(plaintext: key, key: wrappingKey, iv: nonce, aad: aad);
+    return (wrapped: wrapped, nonce: nonce);
   }
 
-  /// Decrypt a DEK using the vault's KEK.
-  static Uint8List unwrapDek({
-    required Uint8List encryptedDek,
-    required Uint8List kek,
+  /// Unwrap a key. Throws when [wrappingKey] or [aad] is not what it was
+  /// wrapped with.
+  static Uint8List unwrapKey({
+    required Uint8List wrapped,
+    required Uint8List wrappingKey,
     required Uint8List nonce,
+    required Uint8List aad,
   }) {
-    return decrypt(ciphertext: encryptedDek, key: kek, iv: nonce);
+    return decrypt(ciphertext: wrapped, key: wrappingKey, iv: nonce, aad: aad);
   }
 
-  /// Verify a passphrase by trying to decrypt the vault's verification token.
-  /// Returns true if passphrase matches this vault.
-  static bool verifyKek({
-    required Uint8List kek,
-    required Uint8List kekVerify,
-    required Uint8List kekVerifyNonce,
-    required String expectedVaultId,
-  }) {
-    try {
-      final decrypted =
-          decrypt(ciphertext: kekVerify, key: kek, iv: kekVerifyNonce);
-      final decryptedStr = utf8.decode(decrypted);
-      return decryptedStr == expectedVaultId;
-    } catch (_) {
-      return false; // Wrong passphrase = decryption fails
-    }
-  }
-
-  static SecureRandom _getSecureRandom() {
-    final secureRandom = SecureRandom('Fortuna');
-    final seed = Uint8List(32);
-    final random = DateTime.now().microsecondsSinceEpoch;
-    for (var i = 0; i < 32; i++) {
-      seed[i] = (random + i * 37) % 256;
-    }
-    secureRandom.seed(KeyParameter(seed));
-    return secureRandom;
-  }
+  static void zero(Uint8List bytes) => bytes.fillRange(0, bytes.length, 0);
 }

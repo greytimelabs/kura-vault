@@ -1,9 +1,9 @@
-import type { CryptoApi, CryptoMethod, CryptoRequest, CryptoResponse } from './protocol';
+import type { CryptoArgs, CryptoMethod, CryptoRequest, CryptoResponse, CryptoResult } from './protocol';
 
-/** Rejection for anything still waiting on the worker when the vault is locked. */
+/** Rejection for anything still waiting on the worker when the keys are destroyed. */
 export class VaultLockedError extends Error {
   constructor() {
-    super('Vault is locked');
+    super('Locked');
     this.name = 'VaultLockedError';
   }
 }
@@ -35,9 +35,9 @@ function getWorker(): Worker {
 /** Call the key-holding worker. Buffers listed in `transfer` are moved to it, not copied. */
 export function cryptoCall<M extends CryptoMethod>(
   method: M,
-  args: Parameters<CryptoApi[M]>[0],
-  transfer: Transferable[] = [],
-): Promise<ReturnType<CryptoApi[M]>> {
+  ...rest: CryptoArgs<M> extends [infer A] ? [args: A, transfer?: Transferable[]] : []
+): Promise<CryptoResult<M>> {
+  const [args, transfer = []] = rest as [unknown?, Transferable[]?];
   return new Promise((resolve, reject) => {
     const id = nextId++;
     pending.set(id, { resolve: resolve as (value: unknown) => void, reject });

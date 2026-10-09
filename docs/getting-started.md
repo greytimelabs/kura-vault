@@ -79,11 +79,31 @@ with `API_PROXY_TARGET` or `WEB_PORT` if you need different ports.
 
 First use:
 
-1. **Register.** The first device to register becomes the owner. Later
-   devices need an invite code created by the owner in Settings.
-2. **Create a vault** and choose its passphrase. There is no recovery: a
-   forgotten passphrase means the vault's contents cannot be decrypted.
+1. **Create the owner account.** A server with no owner prints a setup key
+   when it starts:
+
+   ```
+   No owner account yet. Open a Kura Vault client, choose this
+   server and enter this setup key to create the owner account:
+
+      <setup key>
+   ```
+
+   The page opens on the setup screen. Enter the key, pick a username, a
+   password and a master passphrase. The key works once; a new one is printed
+   on every start until an owner exists. To choose it yourself, set
+   `SETUP_KEY` (32 characters or more) in `backend/.env`.
+2. **Create a vault** and choose its passphrase.
 3. **Upload** a few photos.
+4. **Add someone**: Settings → Manage users → Add user gives an invite link.
+   They open it and choose their own password and master passphrase. Then
+   share a vault (Settings → Share) or one album (Share on the album) with
+   them.
+
+There are three secrets and no recovery for two of them. The **password**
+signs in. The **master passphrase** unlocks your keys and is never sent to
+the server; if it is forgotten, everything only that account could open is
+lost. Each vault you create has its own **vault passphrase** on top.
 
 ### Production build
 
@@ -101,6 +121,24 @@ docker run -p 8080:8080 \
 `VITE_S3_ORIGIN` and `S3_ORIGIN` narrow the Content-Security-Policy to your
 bucket. They default to `https://*.amazonaws.com`.
 
+### Multi-server build
+
+The build above serves one server: its own. A second mode makes a client that
+is hosted apart from any server, where each user types their server address
+and can stay signed in to accounts on several servers:
+
+```bash
+docker build -t kura-vault-web-hosted \
+  --build-arg VITE_MULTI_SERVER=true web
+docker run -p 8080:8080 -e S3_ORIGIN=https: kura-vault-web-hosted
+```
+
+In this mode the policy's `connect-src` allows any `https:` origin, because
+the servers and buckets are not known in advance, and refresh tokens are kept
+in browser storage instead of an httpOnly cookie. Read
+[security.md](security.md#hosted-clients) before choosing it; for your own
+server the default build is the stronger setup.
+
 ## 4. Mobile app
 
 ```bash
@@ -109,14 +147,45 @@ flutter pub get
 flutter run
 ```
 
-The API address is a constant in
-`lib/core/network/api_endpoints.dart` (`http://localhost:3000/api/v1`). Change
-it to your machine's LAN address when running on a physical device.
+The app asks for the server address on first launch, then for a username and
+password. For a backend on your machine use `http://10.0.2.2:3000` from the
+Android emulator, `http://localhost:3000` from the iOS simulator, or your
+machine's LAN address from a physical device. A server with no owner yet goes
+to the setup screen; "I have an invite link" joins with a link from the owner.
+The app is a viewer: uploading, creating vaults, managing users and sharing
+are done in the web client.
+
+More accounts, on the same or other servers, are added from the account
+button in the top bar. Switching account locks everything and asks for the
+other account's master passphrase. Only the server address and username are
+remembered on the device, never the password.
+
+`http://` is accepted only for localhost and private network addresses, after
+a warning. Any other server must use `https://`.
+
+## Using the published apps with your server
+
+The store apps and a hosted web client are the same code as in this
+repository, pointed at whatever server the user types. To make your server
+usable from them:
+
+1. **Serve the API over HTTPS** on an address your devices can reach, for
+   example behind a reverse proxy with a certificate. Clients append
+   `/api/v1` themselves; give users the server root, such as
+   `https://vault.example.com`.
+2. **Mobile apps need nothing else.** They do not use CORS.
+3. **For a hosted web client**, add its origin to `CORS_ORIGINS` on the
+   backend, and to your bucket's CORS rule (methods `GET` and `PUT`, header
+   `content-type`), since the browser talks to both directly.
+
+A client checks an address by calling `GET /api/v1/health` and expecting
+`"app": "kura-vault"` in the answer.
 
 ## Migration CLI
 
 Encrypts and uploads an existing folder of photos and videos into one vault.
-The vault must already exist, and the device must be registered as the owner.
+The vault must already exist, and the account must have created it or have it
+shared with write access.
 
 ```bash
 cd migration-cli
@@ -124,16 +193,21 @@ pnpm install
 pnpm migrate \
   --source ~/Photos \
   --vault-id <vault-uuid> \
-  --passphrase "<vault passphrase>" \
   --api-url http://localhost:3000/api/v1 \
-  --device-id <device-id> \
-  --password "<device password>" \
+  --username <username> \
   --concurrency 5
 ```
 
-The CLI checks the passphrase against the vault before uploading anything.
-Progress is tracked in a local SQLite database, so an interrupted run can be
-restarted with the same command and finished files are skipped.
+It asks for the password, the master passphrase and, for a vault you created,
+the vault passphrase, without echoing them. For unattended runs set
+`KURA_PASSWORD`, `KURA_MASTER_PASSPHRASE` and `KURA_VAULT_PASSPHRASE`, or pass
+`--password`, `--master-passphrase` and `--passphrase`. Add
+`--album-id <album-uuid>` to also put every file into one album.
+
+The CLI opens the vault before uploading anything, so a wrong passphrase stops
+it at the start. Progress is tracked in a local SQLite database, so an
+interrupted run can be restarted with the same command and finished files are
+skipped.
 
 Passing secrets as arguments leaves them in your shell history; clear it
 afterwards or prefix the command with a space if your shell supports that.
@@ -144,6 +218,7 @@ afterwards or prefix the command with a space if your shell supports that.
 |---|---|---|
 | `backend/` | `pnpm test` | nothing |
 | `web/` unit | `pnpm test` | nothing |
+| `web/` server rules | `pnpm test:api` | Docker (its own throwaway PostgreSQL). No browser: the real key handling against the real API, including tampered rows, forged shares and revoked access |
 | `web/` end-to-end | `pnpm test:e2e` | Docker (starts its own throwaway PostgreSQL and a fake storage server) |
 | `migration-cli/` | `pnpm test` | nothing |
 | `app/` | `flutter test` | Flutter |
@@ -171,4 +246,4 @@ Backend variables, validated at startup in `backend/src/config/validation.ts`:
 | `NODE_ENV` | no | `development` | `production` enables secure cookies and hides validation details |
 | `CORS_ORIGINS` | no | `http://localhost:3000` | Comma-separated origins allowed to call the API cross-origin |
 | `THROTTLE_TTL`, `THROTTLE_LIMIT` | no | `60`, `100` | Rate limit: requests per window (seconds) |
-| `HASH_SALT_ROUNDS` | no | `12` | bcrypt cost for device passwords |
+| `HASH_SALT_ROUNDS` | no | `12` | bcrypt cost for account passwords |

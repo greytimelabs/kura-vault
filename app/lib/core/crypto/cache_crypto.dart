@@ -2,11 +2,12 @@ import 'dart:typed_data';
 import 'package:pointycastle/digests/sha256.dart';
 import 'crypto_service.dart';
 
-/// Derives a cache encryption key from KEK using HKDF-like derivation.
+/// Derives a cache encryption key from the key of whatever is open (a vault
+/// key, or an album key when only an album is shared).
 /// Cache key is used to encrypt thumbnails stored on local disk.
 class CacheCrypto {
-  /// Derive cache key from KEK.
-  /// Deterministic: same KEK always produces same cache key.
+  /// Derive cache key from the open vault or album key.
+  /// Deterministic: the same key always produces the same cache key.
   static Uint8List deriveCacheKey(Uint8List kek) {
     final info = Uint8List.fromList('kura-vault-thumbnail-cache'.codeUnits);
     final input = Uint8List(kek.length + info.length);

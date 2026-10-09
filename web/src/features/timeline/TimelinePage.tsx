@@ -2,12 +2,11 @@ import { Images } from 'lucide-react';
 import { MediaView } from './MediaView';
 import { PageHeader } from '../shell/PageHeader';
 import { StateMessage } from '@/components/ui/StateMessage';
-import { useIsOwner } from '@/state/authStore';
-import { useVaultId } from '@/state/vaultStore';
+import { useCanWrite, useVaultId } from '@/state/vaultStore';
 
 export function TimelinePage() {
   const vaultId = useVaultId();
-  const isOwner = useIsOwner();
+  const canWrite = useCanWrite();
 
   return (
     <>
@@ -19,7 +18,7 @@ export function TimelinePage() {
           <StateMessage
             icon={<Images className="size-10" aria-hidden />}
             title="No photos yet"
-            detail={isOwner ? 'Drag photos and videos anywhere onto this window, or use Upload.' : undefined}
+            detail={canWrite ? 'Drag photos and videos anywhere onto this window, or use Upload.' : undefined}
           />
         }
       />

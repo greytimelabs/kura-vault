@@ -11,17 +11,19 @@ flutter pub get
 flutter run
 ```
 
-The API address is the `baseUrl` constant in
-`lib/core/network/api_endpoints.dart`. It defaults to
-`http://localhost:3000/api/v1`; use your machine's LAN address on a physical
-device. Backend setup is in
+The app asks for the server address at first launch; nothing is compiled in.
+For a local backend use `http://10.0.2.2:3000` on the Android emulator,
+`http://localhost:3000` on the iOS simulator, or your machine's LAN address on
+a physical device. Backend setup is in
 [docs/getting-started.md](../docs/getting-started.md).
 
 ## Layout
 
 | Path | Contents |
 |---|---|
-| `lib/core/crypto/` | Argon2id key derivation, AES-256-GCM, cache encryption |
+| `lib/core/crypto/` | Argon2id key derivation, AES-256-GCM, X25519 sealing and Ed25519 signatures, cache encryption |
+| `lib/core/accounts/` | Saved accounts (server + username), the active one, per-account tokens |
+| `lib/core/server/` | Server address parsing and the http-only-on-local-networks rule |
 | `lib/core/network/` | API client, endpoints, auth and error interceptors |
 | `lib/core/storage/` | Secure storage and the encrypted thumbnail cache |
 | `lib/blocs/` | Cubits: auth, vault, crypto, media, album |

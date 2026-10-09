@@ -1,20 +1,13 @@
-import {
-  Injectable, UnauthorizedException, ConflictException,
-  BadRequestException, Logger, ForbiddenException,
-} from '@nestjs/common';
+import { Injectable, UnauthorizedException, Logger, ForbiddenException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, MoreThan, LessThan } from 'typeorm';
+import { Repository, LessThan } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { User } from '../user/entities/user.entity';
 import { RefreshToken } from '../user/entities/refresh-token.entity';
-import { InviteCode } from '../vault/entities/invite-code.entity';
-import { UserVaultAccess } from '../vault/entities/user-vault-access.entity';
-import { JwtPayload, UserRole, VaultPermission } from '../../common/types';
-import { MAX_DEVICES } from '../../common/constants';
-import { RegisterDeviceDto } from './dto/register-device.dto';
+import { AccessLevel, JwtPayload, UserRole, UserStatus } from '../../common/types';
 import { LoginDto } from './dto/login.dto';
 
 @Injectable()
@@ -27,8 +20,6 @@ export class AuthService {
   constructor(
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(RefreshToken) private readonly refreshTokenRepo: Repository<RefreshToken>,
-    @InjectRepository(InviteCode) private readonly inviteCodeRepo: Repository<InviteCode>,
-    @InjectRepository(UserVaultAccess) private readonly userVaultAccessRepo: Repository<UserVaultAccess>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {
@@ -36,99 +27,17 @@ export class AuthService {
   }
 
   /**
-   * Register a new device.
-   * First device becomes owner. Subsequent devices require invite code.
-   */
-  async registerDevice(dto: RegisterDeviceDto): Promise<{ message: string }> {
-    // Check if device already registered
-    const existingUser = await this.userRepo.findOne({
-      where: { deviceId: dto.deviceId },
-    });
-    if (existingUser) {
-      throw new ConflictException('Device already registered');
-    }
-
-    // Check max devices
-    const deviceCount = await this.userRepo.count();
-    if (deviceCount >= MAX_DEVICES) {
-      throw new BadRequestException(`Maximum of ${MAX_DEVICES} devices reached`);
-    }
-
-    // Determine role
-    let role = UserRole.VIEWER;
-    let vaultId: string | null = null;
-
-    if (deviceCount === 0) {
-      // First device = owner
-      role = UserRole.OWNER;
-    } else {
-      // Subsequent devices need invite code
-      if (!dto.inviteCode) {
-        throw new BadRequestException('Invite code required for device registration');
-      }
-
-      const inviteCodeHash = crypto
-        .createHash('sha256')
-        .update(dto.inviteCode)
-        .digest('hex');
-
-      const invite = await this.inviteCodeRepo.findOne({
-        where: {
-          codeHash: inviteCodeHash,
-          isUsed: false,
-          expiresAt: MoreThan(new Date()),
-        },
-      });
-
-      if (!invite) {
-        throw new BadRequestException('Invalid or expired invite code');
-      }
-
-      vaultId = invite.keyGroupId;
-
-      // Mark invite as used
-      invite.isUsed = true;
-      await this.inviteCodeRepo.save(invite);
-    }
-
-    // Hash password with bcrypt (auto-generates salt)
-    const passwordHash = await bcrypt.hash(dto.password, this.saltRounds);
-
-    // Create user
-    const user = this.userRepo.create({
-      name: dto.name,
-      deviceId: dto.deviceId,
-      passwordHash,
-      role,
-    });
-    const savedUser = await this.userRepo.save(user);
-
-    // If invite code provided, grant vault access
-    if (vaultId) {
-      const access = this.userVaultAccessRepo.create({
-        userId: savedUser.id,
-        keyGroupId: vaultId,
-        permission: VaultPermission.VIEW,
-      });
-      await this.userVaultAccessRepo.save(access);
-    }
-
-    this.logger.log(`Device registered: ${dto.deviceId}, role: ${role}`);
-    return { message: 'Device registered successfully' };
-  }
-
-  /**
-   * Authenticate with device_id + password.
+   * Authenticate with username + password.
    * Returns JWT access token + refresh token.
    */
   async login(dto: LoginDto): Promise<{
     accessToken: string;
     refreshToken: string;
     expiresIn: string;
-    user: { id: string; name: string; role: UserRole };
+    user: { id: string; username: string; role: UserRole; accessLevel: AccessLevel };
   }> {
     const user = await this.userRepo.findOne({
-      where: { deviceId: dto.deviceId },
+      where: { username: dto.username },
     });
 
     if (!user) {
@@ -147,9 +56,9 @@ export class AuthService {
       );
     }
 
-    // Check if active
-    if (!user.isActive) {
-      throw new ForbiddenException('Device has been deactivated');
+    // A restricted account cannot start a session
+    if (user.status !== UserStatus.ACTIVE) {
+      throw new ForbiddenException('Account has been deactivated');
     }
 
     // Verify password
@@ -162,7 +71,7 @@ export class AuthService {
           Date.now() + this.lockoutDurationMinutes * 60 * 1000,
         );
         user.failedLoginAttempts = 0;
-        this.logger.warn(`Device locked due to failed attempts: ${dto.deviceId}`);
+        this.logger.warn(`Account locked due to failed attempts: ${dto.username}`);
       }
       await this.userRepo.save(user);
       throw new UnauthorizedException('Invalid credentials');
@@ -177,8 +86,9 @@ export class AuthService {
     // Generate tokens
     const payload: JwtPayload = {
       sub: user.id,
-      deviceId: user.deviceId,
+      username: user.username,
       role: user.role,
+      accessLevel: user.accessLevel,
     };
 
     const accessToken = this.jwtService.sign(payload);
@@ -201,7 +111,7 @@ export class AuthService {
     const refreshToken = this.refreshTokenRepo.create({
       tokenHash: refreshTokenHash,
       userId: user.id,
-      deviceId: user.deviceId,
+      username: user.username,
       expiresAt,
     });
     await this.refreshTokenRepo.save(refreshToken);
@@ -210,7 +120,7 @@ export class AuthService {
       accessToken,
       refreshToken: refreshTokenValue,
       expiresIn: this.configService.get<string>('jwt.expiration', '15m'),
-      user: { id: user.id, name: user.name, role: user.role },
+      user: { id: user.id, username: user.username, role: user.role, accessLevel: user.accessLevel },
     };
   }
 
@@ -243,8 +153,8 @@ export class AuthService {
     }
 
     const user = storedToken.user;
-    if (!user.isActive) {
-      throw new ForbiddenException('Device has been deactivated');
+    if (user.status !== UserStatus.ACTIVE) {
+      throw new ForbiddenException('Account has been deactivated');
     }
 
     // Revoke current refresh token (rotation)
@@ -254,8 +164,9 @@ export class AuthService {
     // Generate new tokens
     const payload: JwtPayload = {
       sub: user.id,
-      deviceId: user.deviceId,
+      username: user.username,
       role: user.role,
+      accessLevel: user.accessLevel,
     };
 
     const newAccessToken = this.jwtService.sign(payload);
@@ -271,7 +182,7 @@ export class AuthService {
     const newRefreshToken = this.refreshTokenRepo.create({
       tokenHash: newRefreshTokenHash,
       userId: user.id,
-      deviceId: user.deviceId,
+      username: user.username,
       expiresAt,
     });
     await this.refreshTokenRepo.save(newRefreshToken);
@@ -285,9 +196,9 @@ export class AuthService {
 
   /**
    * Logout - end the session the given refresh token belongs to.
-   * Clients that send no token (older app builds) end every session of the device.
+   * Clients that send no token (older app builds) end every session of the user.
    */
-  async logout(userId: string, deviceId: string, refreshTokenValue?: string): Promise<void> {
+  async logout(userId: string, username: string, refreshTokenValue?: string): Promise<void> {
     if (refreshTokenValue) {
       const tokenHash = crypto
         .createHash('sha256')
@@ -301,8 +212,24 @@ export class AuthService {
     }
 
     await this.refreshTokenRepo.update(
-      { userId, deviceId, isRevoked: false },
+      { userId, username, isRevoked: false },
       { isRevoked: true },
     );
+  }
+
+  /**
+   * End every session of a user: on restriction, and after a password change.
+   * With the per-request status check this cuts an account off at once.
+   */
+  async revokeAllSessions(userId: string): Promise<void> {
+    await this.refreshTokenRepo.update({ userId, isRevoked: false }, { isRevoked: true });
+  }
+
+  hashPassword(password: string): Promise<string> {
+    return bcrypt.hash(password, this.saltRounds);
+  }
+
+  verifyPassword(password: string, passwordHash: string): Promise<boolean> {
+    return bcrypt.compare(password, passwordHash);
   }
 }

@@ -20,8 +20,8 @@ export class RefreshToken {
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  @Column({ name: 'device_id', type: 'varchar', length: 255 })
-  deviceId: string;
+  @Column({ name: 'username', type: 'varchar', length: 255 })
+  username: string;
 
   @Column({ name: 'expires_at', type: 'timestamptz' })
   expiresAt: Date;

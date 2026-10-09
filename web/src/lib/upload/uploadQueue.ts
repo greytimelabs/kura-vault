@@ -1,5 +1,6 @@
 import { ApiError, NetworkError } from '../api/client';
-import { albumApi, mediaApi } from '../api/endpoints';
+import { ensureAlbumKey } from '../albums';
+import { mediaApi } from '../api/endpoints';
 import type { UploadInitResponse } from '../api/types';
 import { cryptoCall, VaultLockedError } from '../crypto/cryptoClient';
 import type { EncryptedMedia } from '../crypto/protocol';
@@ -81,10 +82,19 @@ async function uploadOne(item: UploadItem, signal: AbortSignal): Promise<void> {
   ]);
   signal.throwIfAborted();
 
+  // The server issues the item's id first: every ciphertext made below is bound to it
+  const albumId = item.albumId ?? undefined;
+  if (albumId) await ensureAlbumKey(albumId, vaultId);
+  const init = await mediaApi.uploadInit({ vaultId, albumId, mediaType, fileSizeBytes: file.size });
+  signal.throwIfAborted();
+
   patch(item.id, { status: 'encrypting' });
   const encrypted = await cryptoCall(
     'encryptMedia',
     {
+      mediaId: init.mediaId,
+      vaultId,
+      albumId,
       thumb: processed.thumb,
       preview: processed.preview,
       original,
@@ -99,33 +109,35 @@ async function uploadOne(item: UploadItem, signal: AbortSignal): Promise<void> {
   signal.throwIfAborted();
 
   patch(item.id, { status: 'uploading', progress: 0 });
-  const init = await mediaApi.uploadInit({ vaultId, mediaType, fileSizeBytes: file.size });
   await uploadTiers(init.uploadUrls, encrypted, signal, (progress) => patch(item.id, { progress }));
 
+  // The item's key goes up wrapped under the vault key (when this account holds
+  // it) and under the album key (when uploading into an album), never bare
   await mediaApi.uploadComplete({
     mediaId: init.mediaId,
     vaultId,
+    albumId,
     mediaType,
     capturedAt: capture.capturedAt,
     fileSizeBytes: file.size,
     ...(processed.width && processed.height ? { width: processed.width, height: processed.height } : {}),
     ...(processed.durationSeconds ? { durationSeconds: processed.durationSeconds } : {}),
-    encryptedDek: encrypted.encryptedDek,
-    dekNonce: encrypted.dekNonce,
+    ...(encrypted.vaultKey
+      ? { keyWrappedVault: encrypted.vaultKey.wrapped, keyNonceVault: encrypted.vaultKey.nonce }
+      : {}),
+    ...(encrypted.albumKey
+      ? { keyWrappedAlbum: encrypted.albumKey.wrapped, keyNonceAlbum: encrypted.albumKey.nonce }
+      : {}),
     thumbIv: encrypted.thumb.iv,
     previewIv: encrypted.preview.iv,
     originalIv: encrypted.original.iv,
     encryptedMeta: encrypted.encryptedMeta,
     metaNonce: encrypted.metaNonce,
   });
-
-  if (item.albumId) {
-    await albumApi.addMedia(item.albumId, init.mediaId);
-  }
 }
 
 function describe(err: unknown): string {
-  if (err instanceof ApiError && err.status === 403) return 'You do not have permission to upload to this vault';
+  if (err instanceof ApiError && err.status === 403) return 'You do not have permission to upload here';
   if (err instanceof ApiError || err instanceof NetworkError) return err.message;
   return err instanceof Error && err.message ? err.message : 'Upload failed';
 }

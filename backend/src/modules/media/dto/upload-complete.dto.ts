@@ -1,5 +1,6 @@
-import { IsString, IsNotEmpty, IsUUID, IsOptional, IsEnum, IsNumber } from 'class-validator';
+import { IsUUID, IsOptional, IsEnum, IsNumber, IsString } from 'class-validator';
 import { MediaType } from '../../../common/types';
+import { IsEncoded } from '../../../common/validation';
 
 export class UploadCompleteDto {
   @IsUUID()
@@ -7,6 +8,10 @@ export class UploadCompleteDto {
 
   @IsUUID()
   vaultId: string;
+
+  @IsOptional()
+  @IsUUID()
+  albumId?: string;
 
   @IsEnum(MediaType)
   @IsOptional()
@@ -32,37 +37,39 @@ export class UploadCompleteDto {
   @IsNumber()
   durationSeconds?: number;
 
-  /**
-   * DEK encrypted with the vault's KEK. Base64.
-   */
-  @IsString()
-  @IsNotEmpty()
-  encryptedDek: string;
+  /** The item's key wrapped under the vault key. Sent by uploaders who hold the vault key. */
+  @IsOptional()
+  @IsEncoded(128)
+  keyWrappedVault?: string;
 
-  @IsString()
-  @IsNotEmpty()
-  dekNonce: string;
+  @IsOptional()
+  @IsEncoded(32)
+  keyNonceVault?: string;
 
-  @IsString()
-  @IsNotEmpty()
+  /** The item's key wrapped under the album key. Sent with `albumId`. */
+  @IsOptional()
+  @IsEncoded(128)
+  keyWrappedAlbum?: string;
+
+  @IsOptional()
+  @IsEncoded(32)
+  keyNonceAlbum?: string;
+
+  @IsEncoded(32)
   thumbIv: string;
 
-  @IsString()
-  @IsNotEmpty()
+  @IsEncoded(32)
   previewIv: string;
 
-  @IsString()
-  @IsNotEmpty()
+  @IsEncoded(32)
   originalIv: string;
 
-  /**
-   * Sensitive metadata encrypted with vault KEK. Base64.
-   */
+  /** Sensitive metadata encrypted under the item's own key. */
   @IsOptional()
-  @IsString()
+  @IsEncoded(8192)
   encryptedMeta?: string;
 
   @IsOptional()
-  @IsString()
+  @IsEncoded(32)
   metaNonce?: string;
 }

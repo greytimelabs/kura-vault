@@ -8,7 +8,7 @@ function makeController(nodeEnv = 'development') {
       accessToken: 'access',
       refreshToken: 'refresh-1',
       expiresIn: '15m',
-      user: { id: 'user-1', name: 'Browser', role: 'owner' },
+      user: { id: 'user-1', username: 'user-one', role: 'owner', accessLevel: 'full' },
     })),
     refreshAccessToken: jest.fn(async () => ({
       accessToken: 'access-2',
@@ -25,7 +25,7 @@ function makeController(nodeEnv = 'development') {
 
 const webReq = (cookies: Record<string, string> = {}) => ({ headers: { 'x-client': 'web' }, cookies }) as any;
 const appReq = (cookies: Record<string, string> = {}) => ({ headers: {}, cookies }) as any;
-const credentials = { deviceId: 'device-1', password: 'pw' };
+const credentials = { username: 'user-one', password: 'pw' };
 
 describe('AuthController refresh cookie', () => {
   it('web login sets an httpOnly cookie and keeps the token out of the body', async () => {
@@ -100,21 +100,21 @@ describe('AuthController refresh cookie', () => {
 
   it('web logout ends the cookie\'s session and clears it', async () => {
     const { controller, authService, res } = makeController();
-    const user = { sub: 'user-1', deviceId: 'device-1', role: 'owner' } as any;
+    const user = { sub: 'user-1', username: 'user-one', role: 'owner' } as any;
 
     await controller.logout(user, {}, webReq({ [REFRESH_COOKIE_NAME]: 'refresh-1' }), res as any);
 
-    expect(authService.logout).toHaveBeenCalledWith('user-1', 'device-1', 'refresh-1');
+    expect(authService.logout).toHaveBeenCalledWith('user-1', 'user-one', 'refresh-1');
     expect(res.clearCookie).toHaveBeenCalled();
   });
 
   it('app logout passes its body token through', async () => {
     const { controller, authService, res } = makeController();
-    const user = { sub: 'user-1', deviceId: 'device-1', role: 'owner' } as any;
+    const user = { sub: 'user-1', username: 'user-one', role: 'owner' } as any;
 
     await controller.logout(user, { refreshToken: 'from-app' }, appReq(), res as any);
 
-    expect(authService.logout).toHaveBeenCalledWith('user-1', 'device-1', 'from-app');
+    expect(authService.logout).toHaveBeenCalledWith('user-1', 'user-one', 'from-app');
     expect(res.clearCookie).not.toHaveBeenCalled();
   });
 });

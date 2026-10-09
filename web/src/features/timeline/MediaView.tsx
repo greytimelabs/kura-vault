@@ -7,7 +7,7 @@ import { useViewerParam } from '../viewer/useViewerParam';
 import { ErrorState } from '@/components/ui/StateMessage';
 import { errorMessage } from '@/lib/api/client';
 import type { MediaItem } from '@/lib/api/types';
-import { useIsOwner } from '@/state/authStore';
+import { useCanOrganise } from '@/state/vaultStore';
 
 interface MediaViewProps {
   vaultId: string;
@@ -17,9 +17,9 @@ interface MediaViewProps {
   empty: ReactNode;
   /** Narrow what the grid shows (the viewer still steps through everything loaded). */
   filter?(item: MediaItem): boolean;
-  /** Regular album being shown, enabling "Remove from album" for owners. */
+  /** Regular album being shown, enabling "Remove from album" for people who can change the vault. */
   album?: { id: string; name: string };
-  /** Albums other than the Liked one can be edited by owners; Liked cannot. */
+  /** Albums other than the Liked one can be edited by people who can change the vault; Liked cannot. */
   selectable?: boolean;
   onViewerClose?(): void;
 }
@@ -37,7 +37,8 @@ export function MediaView({
 }: MediaViewProps) {
   const list = useMediaList(vaultId, albumId);
   const viewer = useViewerParam();
-  const isOwner = useIsOwner();
+  // Moving items between albums takes the whole vault with write access
+  const canOrganise = useCanOrganise();
 
   // Tell the parent once the viewer is really gone, not when closing starts:
   // changing the list while the viewer is still mounted would pull the open
@@ -70,11 +71,11 @@ export function MediaView({
           onLoadMore={list.loadMore}
           onOpen={viewer.open}
           onThumbExpired={list.renewLinks}
-          selectable={isOwner && selectable}
+          selectable={canOrganise && selectable}
         />
       )}
 
-      {isOwner && selectable && <SelectionBar vaultId={vaultId} album={album} />}
+      {canOrganise && selectable && <SelectionBar vaultId={vaultId} album={album} />}
 
       {viewer.viewerId && (
         <Viewer

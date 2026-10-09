@@ -14,7 +14,7 @@ interface SelectionBarProps {
   album?: { id: string; name: string };
 }
 
-/** Floating actions for the selected photos. Owners only. */
+/** Floating actions for the selected photos. Only for people who can change the vault. */
 export function SelectionBar({ vaultId, album }: SelectionBarProps) {
   const selected = useSelectionStore((s) => s.selected);
   const clear = useSelectionStore((s) => s.clear);

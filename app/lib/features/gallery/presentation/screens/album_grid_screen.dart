@@ -41,6 +41,21 @@ class _AlbumGridScreenState extends State<AlbumGridScreen> {
           );
         }
 
+        // Loads each album's key through the vault key and decrypts its name
+        final crypto = context.read<VaultCryptoCubit>();
+        final vaultId = crypto.state.activeVaultId;
+        final names = vaultId == null
+            ? const <String, String>{}
+            : crypto.openAlbums(vaultId, [
+                for (final a in state.albums)
+                  (
+                    id: a.id,
+                    keyWrapped: a.keyWrapped,
+                    keyNonce: a.keyNonce,
+                    nameEncrypted: a.nameEncrypted,
+                    nameNonce: a.nameNonce,
+                  ),
+              ]);
         return GridView.builder(
           padding: const EdgeInsets.all(8),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -54,6 +69,7 @@ class _AlbumGridScreenState extends State<AlbumGridScreen> {
             final album = state.albums[index];
             return AlbumCard(
               album: album,
+              name: names[album.id],
               onTap: () async {
                 await context.push(
                   '/gallery/albums/${album.id}',

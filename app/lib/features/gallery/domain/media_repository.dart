@@ -33,7 +33,7 @@ class MediaRepository {
     );
   }
 
-  Future<Map<String, dynamic>> getMediaUrls(String mediaId, String vaultId) {
-    return _remoteSource.getMediaUrls(mediaId, vaultId);
+  Future<Map<String, dynamic>> getMediaUrls(String mediaId) {
+    return _remoteSource.getMediaUrls(mediaId);
   }
 }

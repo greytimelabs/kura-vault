@@ -1,17 +1,21 @@
 import { clsx } from 'clsx';
-import { KeyRound, Lock, LogOut, Trash2, UserPlus } from 'lucide-react';
+import { KeyRound, Lock, LogOut, Share2, Trash2, UserRound, Users } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
-import { InviteDialog } from './InviteDialog';
+import { useNavigate } from 'react-router-dom';
+import { ShareDialog } from '../sharing/ShareDialog';
 import { PageHeader } from '../shell/PageHeader';
 import { CreateVaultDialog } from '../unlock/CreateVaultDialog';
 import { Button } from '@/components/ui/Button';
 import { clearThumbUrls } from '@/lib/media/thumbLoader';
 import { clearThumbStore } from '@/lib/media/thumbStore';
-import { discardVaultMatches, lockVault, signOut } from '@/lib/session';
-import { useAuthStore, useIsOwner } from '@/state/authStore';
+import { MULTI_SERVER } from '@/lib/config';
+import { hostOf } from '@/lib/serverUrl';
+import { closeVault, discardVaultMatches, lockVault, removeAccount, signOut, switchAccount } from '@/lib/session';
+import { useAccountStore } from '@/state/accountStore';
+import { useAuthStore, useCanCreateVaults, useIsOwner } from '@/state/authStore';
 import { AUTO_LOCK_OPTIONS, usePreferences, type ThemeChoice } from '@/state/preferences';
 import { toast } from '@/state/toastStore';
-import { useVaultId, useVaultStore } from '@/state/vaultStore';
+import { useAlbumOnlyId, useIsCreator, useVaultId, useVaultStore } from '@/state/vaultStore';
 
 const THEMES: { value: ThemeChoice; label: string }[] = [
   { value: 'system', label: 'System' },
@@ -19,15 +23,21 @@ const THEMES: { value: ThemeChoice; label: string }[] = [
   { value: 'dark', label: 'Dark' },
 ];
 
-const autoLockLabel = (minutes: number) => (minutes === 0 ? 'Never' : minutes === 60 ? '1 hour' : `${minutes} minutes`);
+const autoLockLabel = (minutes: number) => (minutes === 1 ? '1 minute' : `${minutes} minutes`);
 
 export function SettingsPage() {
   const vaultId = useVaultId();
   const vaultLabel = useVaultStore((s) => s.label) ?? 'this vault';
   const user = useAuthStore((s) => s.user);
   const isOwner = useIsOwner();
+  const canCreateVaults = useCanCreateVaults();
+  const isCreator = useIsCreator();
+  const albumOnly = useAlbumOnlyId() !== null;
+  const navigate = useNavigate();
+  const savedAccounts = useAccountStore((s) => s.accounts);
+  const activeAccountId = useAccountStore((s) => s.activeId);
   const { theme, setTheme, autoLockMinutes, setAutoLockMinutes } = usePreferences();
-  const [inviting, setInviting] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [creatingVault, setCreatingVault] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -42,16 +52,30 @@ export function SettingsPage() {
       <PageHeader title="Settings" />
 
       <Section title="Vault">
+        {isCreator && (
+          <Row
+            icon={<Share2 className="size-5" />}
+            title="Share this vault"
+            detail={`Choose who else can open ${vaultLabel}, and whether they can add photos.`}
+            action={<Button onClick={() => setSharing(true)}>Share</Button>}
+          />
+        )}
+        <Row
+          icon={<LogOut className="size-5" />}
+          title={albumOnly ? 'Close album' : 'Close vault'}
+          detail="Go back to the list of what you can open. You stay unlocked."
+          action={<Button onClick={closeVault}>Close</Button>}
+        />
         <Row
           icon={<Lock className="size-5" />}
-          title="Lock vault"
-          detail="Wipe keys from memory. The passphrase is needed to open it again."
+          title="Lock"
+          detail="Wipe every key from memory. The master passphrase is needed again."
           action={<Button onClick={lockVault}>Lock now</Button>}
         />
         <Row
           icon={<KeyRound className="size-5" />}
           title="Lock automatically"
-          detail="After this long without activity in this tab."
+          detail="Every key is wiped after this long without activity in this tab."
           action={
             <select
               aria-label="Lock automatically after"
@@ -75,20 +99,24 @@ export function SettingsPage() {
         />
       </Section>
 
-      {isOwner && (
-        <Section title="Owner tools">
-          <Row
-            icon={<UserPlus className="size-5" />}
-            title="Invite a device"
-            detail={`Create a one-time code that lets a new device view ${vaultLabel}.`}
-            action={<Button onClick={() => setInviting(true)}>Create code</Button>}
-          />
-          <Row
-            icon={<KeyRound className="size-5" />}
-            title="Create a vault"
-            detail="A separate set of photos with its own passphrase."
-            action={<Button onClick={() => setCreatingVault(true)}>New vault</Button>}
-          />
+      {(isOwner || canCreateVaults) && (
+        <Section title="Manage">
+          {isOwner && (
+            <Row
+              icon={<Users className="size-5" />}
+              title="Users"
+              detail="Add people, change what they may do, or restrict an account."
+              action={<Button onClick={() => navigate('/users')}>Manage users</Button>}
+            />
+          )}
+          {canCreateVaults && (
+            <Row
+              icon={<KeyRound className="size-5" />}
+              title="Create a vault"
+              detail="A separate set of photos with its own passphrase."
+              action={<Button onClick={() => setCreatingVault(true)}>New vault</Button>}
+            />
+          )}
         </Section>
       )}
 
@@ -115,11 +143,43 @@ export function SettingsPage() {
         </div>
       </Section>
 
+      {MULTI_SERVER && (
+        <Section title="Accounts">
+          {savedAccounts.map((account) => (
+            <Row
+              key={account.id}
+              icon={<UserRound className="size-5" />}
+              title={account.username}
+              detail={`${hostOf(account.serverUrl)}${
+                account.id === activeAccountId ? ' · Active' : account.signedIn ? '' : ' · Sign in required'
+              }`}
+              action={
+                <div className="flex gap-2">
+                  {account.id !== activeAccountId && (
+                    <Button onClick={() => void switchAccount(account.id)}>Switch</Button>
+                  )}
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      if (window.confirm(`Remove ${account.username} on ${hostOf(account.serverUrl)} from this browser?`)) {
+                        void removeAccount(account.id);
+                      }
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              }
+            />
+          ))}
+        </Section>
+      )}
+
       <Section title="Account">
         <Row
           icon={<LogOut className="size-5 text-danger" />}
           title="Logout"
-          detail={`Signed in as ${user?.deviceId ?? ''} (${user?.role ?? ''}). Signs out here and clears all local data.`}
+          detail={`Signed in as ${user?.username ?? ''}${user?.role === 'owner' ? ' (owner)' : ''}. Signs out here and clears all local data.`}
           action={
             <Button
               variant="danger"
@@ -135,14 +195,16 @@ export function SettingsPage() {
         />
       </Section>
 
-      <InviteDialog open={inviting} onOpenChange={setInviting} vaultId={vaultId} vaultLabel={vaultLabel} />
+      {isCreator && (
+        <ShareDialog open={sharing} onOpenChange={setSharing} target={{ kind: 'vault', id: vaultId, name: vaultLabel }} />
+      )}
       <CreateVaultDialog
         open={creatingVault}
         onOpenChange={setCreatingVault}
         onCreated={(vault) => {
           // Another vault is open; drop the new one's key rather than switching silently
           discardVaultMatches();
-          toast(`Created ${vault.label}. Lock this vault and enter its passphrase to open it.`);
+          toast(`Created ${vault.label}. Close this vault and enter its passphrase to open it.`);
         }}
       />
     </div>

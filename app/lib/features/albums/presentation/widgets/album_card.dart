@@ -3,9 +3,12 @@ import '../../../../blocs/album/album_state.dart';
 
 class AlbumCard extends StatelessWidget {
   final AlbumItem album;
+
+  /// Decrypted name. Null for the Liked album, or when it cannot be decrypted.
+  final String? name;
   final VoidCallback? onTap;
 
-  const AlbumCard({super.key, required this.album, this.onTap});
+  const AlbumCard({super.key, required this.album, this.name, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -35,11 +38,12 @@ class AlbumCard extends StatelessWidget {
                 children: [
                   const Icon(Icons.lock, size: 14, color: Colors.grey),
                   const SizedBox(width: 4),
-                  Text(
-                    isLiked
-                        ? 'Liked · ${album.mediaCount} items'
-                        : '${album.mediaCount} items',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  Expanded(
+                    child: Text(
+                      '${isLiked ? 'Liked' : (name ?? 'Album')} · ${album.mediaCount} items',
+                      style: Theme.of(context).textTheme.bodySmall,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ],
               ),

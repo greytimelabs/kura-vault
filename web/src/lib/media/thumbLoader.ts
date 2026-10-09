@@ -1,6 +1,6 @@
 import type { MediaItem } from '../api/types';
-import { cryptoCall } from '../crypto/cryptoClient';
 import { TaskQueue, fetchEncrypted } from './blobFetch';
+import { decryptTier } from './mediaKey';
 import { getThumbCiphertext, hasThumbCiphertext, putThumbCiphertext, removeThumbCiphertext } from './thumbStore';
 
 // Decrypted thumbnails exist only as in-memory object URLs, capped and revoked on
@@ -33,12 +33,7 @@ export function peekThumbUrl(id: string): string | undefined {
 
 async function decryptToUrl(item: MediaItem, ciphertext: ArrayBuffer): Promise<string> {
   // Not transferred: the same bytes may still be on their way into the disk cache
-  const plain = await cryptoCall('decryptBlob', {
-    encryptedDek: item.encryptedDek,
-    dekNonce: item.dekNonce,
-    iv: item.thumbIv,
-    data: ciphertext,
-  });
+  const plain = await decryptTier(item, 'thumb', item.thumbIv, ciphertext);
   return URL.createObjectURL(new Blob([plain], { type: 'image/jpeg' }));
 }
 

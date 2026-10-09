@@ -1,13 +1,12 @@
 import {
-  Controller, Get, Post, Put, Delete, Body, Param, Query,
+  Controller, Get, Post, Put, Patch, Delete, Body, Param, Query,
   UseGuards, ParseUUIDPipe,
 } from '@nestjs/common';
 import { AlbumService } from './album.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../../common/guards/roles.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtPayload, UserRole } from '../../common/types';
+import { JwtPayload } from '../../common/types';
+import { AddMemberDto, UpdateMemberDto } from '../../common/validation/share.dto';
 import { CreateAlbumDto } from './dto/create-album.dto';
 import { UpdateAlbumDto } from './dto/update-album.dto';
 import { AddMediaToAlbumDto } from './dto/add-media-to-album.dto';
@@ -26,14 +25,18 @@ export class AlbumController {
     return this.albumService.listAlbums(user.sub, vaultId);
   }
 
+  /** Albums shared with the caller on their own. Declared before `:id` so `shared` is not parsed as an id. */
+  @Get('shared')
+  async listShared(@CurrentUser() user: JwtPayload) {
+    return this.albumService.listShared(user.sub);
+  }
+
   @Post()
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.OWNER)
   async createAlbum(@CurrentUser() user: JwtPayload, @Body() dto: CreateAlbumDto) {
     return this.albumService.createAlbum(user.sub, dto);
   }
 
-  // Liked routes are open to viewers, and must be declared before the `:id` routes
+  // Liked routes are open to anyone who can see the item, and must be declared before the `:id` routes
   // so `liked` is not parsed as an album id.
 
   @Put('liked/media/:mediaId')
@@ -55,8 +58,6 @@ export class AlbumController {
   }
 
   @Put(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.OWNER)
   async updateAlbum(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) albumId: string,
@@ -66,8 +67,6 @@ export class AlbumController {
   }
 
   @Post(':id/media')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.OWNER)
   async addMedia(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) albumId: string,
@@ -77,13 +76,47 @@ export class AlbumController {
   }
 
   @Delete(':id/media/:mediaId')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.OWNER)
   async removeMedia(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) albumId: string,
     @Param('mediaId', ParseUUIDPipe) mediaId: string,
   ) {
     return this.albumService.removeMedia(user.sub, albumId, mediaId);
+  }
+
+  @Get(':id/members')
+  async listMembers(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) albumId: string) {
+    return this.albumService.listMembers(user.sub, albumId);
+  }
+
+  @Post(':id/members')
+  async addMember(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) albumId: string,
+    @Body() dto: AddMemberDto,
+  ) {
+    await this.albumService.addMember(user.sub, albumId, dto);
+    return null;
+  }
+
+  @Patch(':id/members/:userId')
+  async updateMember(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) albumId: string,
+    @Param('userId', ParseUUIDPipe) memberId: string,
+    @Body() dto: UpdateMemberDto,
+  ) {
+    await this.albumService.updateMember(user.sub, albumId, memberId, dto.permission);
+    return null;
+  }
+
+  @Delete(':id/members/:userId')
+  async removeMember(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) albumId: string,
+    @Param('userId', ParseUUIDPipe) memberId: string,
+  ) {
+    await this.albumService.removeMember(user.sub, albumId, memberId);
+    return null;
   }
 }

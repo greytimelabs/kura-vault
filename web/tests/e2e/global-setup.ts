@@ -1,17 +1,11 @@
-import { request } from '@playwright/test';
-import { API_URL, OWNER } from './env';
+import { ApiUser } from './apiUser';
+import { OWNER, SETUP_KEY } from './env';
 
 /**
- * The first device ever registered becomes the owner. All three browser projects
- * share one backend, so that registration happens once, here, before any of them start.
+ * A new server has no accounts and accepts one thing: creating its owner with
+ * the setup key. All three browser projects share one backend, so that happens
+ * once, here, before any of them start, with the same key handling the page runs.
  */
 export default async function globalSetup(): Promise<void> {
-  const api = await request.newContext();
-  const response = await api.post(`${API_URL}/auth/register`, {
-    data: { name: OWNER.name, deviceId: OWNER.deviceId, password: OWNER.password },
-  });
-  if (!response.ok()) {
-    throw new Error(`Could not register the owner device: ${response.status()} ${await response.text()}`);
-  }
-  await api.dispose();
+  await ApiUser.setup(SETUP_KEY, OWNER);
 }

@@ -45,14 +45,14 @@ interface ViewerProps {
 type FullscreenElement = HTMLElement & { webkitRequestFullscreen?: () => void };
 type FullscreenDocument = Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => void };
 
-function usePreview(item: MediaItem | undefined, vaultId: string) {
+function usePreview(item: MediaItem | undefined) {
   const [state, setState] = useState<{ id: string; url?: string; failed?: boolean }>({ id: '' });
 
   useEffect(() => {
     if (!item) return;
     let cancelled = false;
     setState({ id: item.id, url: peekPreviewUrl(item.id) });
-    loadPreviewUrl(item, vaultId).then(
+    loadPreviewUrl(item).then(
       (url) => {
         if (!cancelled) setState({ id: item.id, url });
       },
@@ -64,7 +64,7 @@ function usePreview(item: MediaItem | undefined, vaultId: string) {
       cancelled = true;
     };
     // The item object is replaced on every like; only its identity matters here
-  }, [item?.id, vaultId]);
+  }, [item?.id]);
 
   // Ignore a result that belongs to the previous photo
   return item && state.id === item.id ? state : { id: item?.id ?? '' };
@@ -76,7 +76,7 @@ export function Viewer({ vaultId, items, itemId, hasMore, onLoadMore, onShow, on
   const previous = index > 0 ? items[index - 1] : undefined;
   const next = index !== -1 && index < items.length - 1 ? items[index + 1] : undefined;
 
-  const preview = usePreview(item, vaultId);
+  const preview = usePreview(item);
   const toggleLike = useToggleLike(vaultId);
   const zoomRef = useRef<ZoomHandle>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -99,16 +99,16 @@ export function Viewer({ vaultId, items, itemId, hasMore, onLoadMore, onShow, on
   useEffect(() => {
     if (!preview.url || !next) return;
     const timer = setTimeout(() => {
-      void loadPreviewUrl(next, vaultId).catch(() => undefined);
+      void loadPreviewUrl(next).catch(() => undefined);
     }, PRELOAD_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [preview.url, next, vaultId]);
+  }, [preview.url, next]);
 
   const download = useCallback(async () => {
     if (!item || downloading) return;
     setDownloading(true);
     try {
-      await downloadOriginal(item, vaultId);
+      await downloadOriginal(item);
     } catch (err) {
       if (!(err instanceof VaultLockedError)) {
         toast(err instanceof TooLargeError ? err.message : errorMessage(err, 'Could not download this file'), 'error');
@@ -116,7 +116,7 @@ export function Viewer({ vaultId, items, itemId, hasMore, onLoadMore, onShow, on
     } finally {
       setDownloading(false);
     }
-  }, [item, vaultId, downloading]);
+  }, [item, downloading]);
 
   const toggleFullscreen = useCallback(() => {
     const doc = document as FullscreenDocument;

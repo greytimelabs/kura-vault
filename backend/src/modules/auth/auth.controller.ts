@@ -8,7 +8,6 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/types';
 import { REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH, REFRESH_TOKEN_TTL_MS } from '../../common/constants';
-import { RegisterDeviceDto } from './dto/register-device.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { LogoutDto } from './dto/logout.dto';
@@ -19,12 +18,6 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
   ) {}
-
-  @Post('register')
-  @HttpCode(HttpStatus.CREATED)
-  async register(@Body() dto: RegisterDeviceDto) {
-    return this.authService.registerDevice(dto);
-  }
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
@@ -80,7 +73,7 @@ export class AuthController {
   ) {
     const isWeb = this.isWebClient(req);
     const refreshToken = dto?.refreshToken ?? this.readRefreshCookie(req);
-    await this.authService.logout(user.sub, user.deviceId, refreshToken);
+    await this.authService.logout(user.sub, user.username, refreshToken);
     if (isWeb) {
       this.clearRefreshCookie(res);
     }

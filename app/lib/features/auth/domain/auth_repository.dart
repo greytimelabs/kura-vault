@@ -1,62 +1,53 @@
 import '../data/auth_remote_source.dart';
-import '../../../core/auth/auth_manager.dart';
-import '../../../core/storage/secure_storage_service.dart';
+import '../../../core/accounts/account_store.dart';
 
 class AuthRepository {
   final AuthRemoteSource _remoteSource;
-  final AuthManager _authManager;
-  final SecureStorageService _secureStorage;
+  final AccountStore _accounts;
 
   AuthRepository({
     required AuthRemoteSource remoteSource,
-    required AuthManager authManager,
-    required SecureStorageService secureStorage,
+    required AccountStore accounts,
   })  : _remoteSource = remoteSource,
-        _authManager = authManager,
-        _secureStorage = secureStorage;
-
-  Future<void> register({
-    required String name,
-    required String deviceId,
-    required String password,
-    String? inviteCode,
-  }) async {
-    await _remoteSource.register(
-      name: name,
-      deviceId: deviceId,
-      password: password,
-      inviteCode: inviteCode,
-    );
-  }
+        _accounts = accounts;
 
   Future<Map<String, dynamic>> login({
-    required String deviceId,
+    required String serverUrl,
+    required String username,
     required String password,
   }) async {
     final data = await _remoteSource.login(
-      deviceId: deviceId,
+      serverUrl: serverUrl,
+      username: username,
       password: password,
     );
 
-    await _authManager.saveSession(
-      accessToken: data['accessToken'] as String,
-      refreshToken: data['refreshToken'] as String,
+    await _accounts.saveSignIn(
+      serverUrl: serverUrl,
+      username: username,
       userId: data['user']['id'] as String,
       role: data['user']['role'] as String,
+      accessLevel: data['user']['accessLevel'] as String?,
+      accessToken: data['accessToken'] as String,
+      refreshToken: data['refreshToken'] as String,
     );
-    await _secureStorage.saveDeviceId(deviceId);
 
     return data;
   }
 
+  /// Sign out of the active account, keeping its server and username.
   Future<void> logout() async {
+    final active = _accounts.active;
+    if (active == null) return;
     try {
-      await _remoteSource.logout();
+      await _remoteSource.logout(
+        refreshToken: await _accounts.refreshToken(active.id),
+      );
     } catch (_) {
       // Best-effort
     }
-    await _authManager.clearSession();
+    await _accounts.markSignedOut(active.id);
   }
 
-  Future<bool> isLoggedIn() => _authManager.isLoggedIn();
+  bool isLoggedIn() => _accounts.active?.signedIn ?? false;
 }

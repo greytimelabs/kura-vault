@@ -1,4 +1,4 @@
-import { UploadInitResponse, VaultInfo } from './types';
+import { Account, AlbumRow, UploadInitResponse, VaultRow } from './types';
 
 /**
  * API client for the Kura Vault backend.
@@ -11,100 +11,80 @@ export class ApiClient {
     this.baseUrl = baseUrl;
   }
 
-  /**
-   * Login with device_id + password to get JWT token.
-   */
-  async login(deviceId: string, password: string): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deviceId, password }),
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Login failed (${response.status}): ${body}`);
-    }
-
-    const data = await response.json();
-    this.accessToken = data.data.accessToken;
-  }
-
-  /**
-   * List vaults with the salt and verification token needed to derive and check a KEK.
-   */
-  async listVaults(): Promise<VaultInfo[]> {
-    const response = await fetch(`${this.baseUrl}/vaults`, {
-      headers: { Authorization: `Bearer ${this.accessToken}` },
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Listing vaults failed (${response.status}): ${body}`);
-    }
-
-    const data = await response.json();
-    return data.data as VaultInfo[];
-  }
-
-  /**
-   * Initialize upload — get pre-signed S3 URLs.
-   */
-  async uploadInit(vaultId: string, mediaType: string, metadata: {
-    capturedAt?: string | null;
-    width?: number | null;
-    height?: number | null;
-    durationSeconds?: number | null;
-    fileSizeBytes?: number | null;
-  }): Promise<UploadInitResponse> {
-    const response = await fetch(`${this.baseUrl}/media/upload/init`, {
-      method: 'POST',
+  private async request<T>(what: string, path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: init.method ?? 'GET',
       headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.accessToken}`,
+        ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(this.accessToken ? { Authorization: `Bearer ${this.accessToken}` } : {}),
       },
-      body: JSON.stringify({
-        vaultId,
-        mediaType,
-        ...metadata,
-      }),
+      body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
     });
 
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(`Upload init failed (${response.status}): ${body}`);
+      throw new Error(`${what} failed (${response.status}): ${body}`);
     }
 
     const data = await response.json();
-    return data.data as UploadInitResponse;
+    return data.data as T;
   }
 
   /**
-   * Complete upload — store metadata + encrypted DEK.
+   * Login with username + password to get JWT token.
+   */
+  async login(username: string, password: string): Promise<void> {
+    const data = await this.request<{ accessToken: string }>('Login', '/auth/login', {
+      method: 'POST',
+      body: { username, password },
+    });
+    this.accessToken = data.accessToken;
+  }
+
+  /** The signed-in account, with its private keys as only the master passphrase can open them. */
+  getAccount(): Promise<Account> {
+    return this.request<Account>('Loading the account', '/me');
+  }
+
+  /** The vaults this account can open, each with the account's wrapped copy of its key. */
+  listVaults(): Promise<VaultRow[]> {
+    return this.request<VaultRow[]>('Listing vaults', '/vaults');
+  }
+
+  listAlbums(vaultId: string): Promise<AlbumRow[]> {
+    return this.request<AlbumRow[]>('Listing albums', `/albums?vaultId=${encodeURIComponent(vaultId)}`);
+  }
+
+  /**
+   * Initialize upload — get the item's id and pre-signed S3 URLs.
+   */
+  uploadInit(input: { vaultId: string; albumId?: string; mediaType: string; fileSizeBytes?: number }): Promise<UploadInitResponse> {
+    return this.request<UploadInitResponse>('Upload init', '/media/upload/init', { method: 'POST', body: input });
+  }
+
+  /**
+   * Complete upload — store metadata and the item's wrapped key.
    */
   async uploadComplete(params: {
     mediaId: string;
     vaultId: string;
-    encryptedDek: string;
-    dekNonce: string;
+    albumId?: string;
+    mediaType: string;
+    capturedAt?: string;
+    width?: number;
+    height?: number;
+    durationSeconds?: number;
+    fileSizeBytes?: number;
+    keyWrappedVault: string;
+    keyNonceVault: string;
+    keyWrappedAlbum?: string;
+    keyNonceAlbum?: string;
     thumbIv: string;
     previewIv: string;
     originalIv: string;
     encryptedMeta: string;
     metaNonce: string;
   }): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/media/upload/complete`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.accessToken}`,
-      },
-      body: JSON.stringify(params),
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Upload complete failed (${response.status}): ${body}`);
-    }
+    await this.request('Upload complete', '/media/upload/complete', { method: 'POST', body: params });
   }
 }

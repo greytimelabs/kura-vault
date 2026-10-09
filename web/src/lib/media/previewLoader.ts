@@ -2,6 +2,7 @@ import { mediaApi } from '../api/endpoints';
 import type { MediaItem, MediaMeta } from '../api/types';
 import { cryptoCall } from '../crypto/cryptoClient';
 import { fetchEncrypted } from './blobFetch';
+import { decryptTier, keyRefOf } from './mediaKey';
 
 // Decrypted previews are large, so only the few around the open photo are kept.
 const MAX_PREVIEWS = 6;
@@ -15,20 +16,16 @@ export function peekPreviewUrl(id: string): string | undefined {
   return previews.get(id);
 }
 
-async function load(item: MediaItem, vaultId: string): Promise<string> {
+async function load(item: MediaItem): Promise<string> {
   // Links live for 60 seconds, so they are requested right before use
-  const links = await mediaApi.urls(item.id, vaultId);
+  const links = await mediaApi.urls(item.id);
   const ciphertext = await fetchEncrypted(links.previewUrl);
-  const plain = await cryptoCall(
-    'decryptBlob',
-    { encryptedDek: item.encryptedDek, dekNonce: item.dekNonce, iv: links.previewIv, data: ciphertext },
-    [ciphertext],
-  );
+  const plain = await decryptTier(item, 'preview', links.previewIv, ciphertext, [ciphertext]);
   return URL.createObjectURL(new Blob([plain], { type: 'image/jpeg' }));
 }
 
 /** Object URL of the decrypted 1080px preview. */
-export function loadPreviewUrl(item: MediaItem, vaultId: string): Promise<string> {
+export function loadPreviewUrl(item: MediaItem): Promise<string> {
   const ready = previews.get(item.id);
   if (ready) {
     previews.delete(item.id);
@@ -38,7 +35,7 @@ export function loadPreviewUrl(item: MediaItem, vaultId: string): Promise<string
 
   let promise = inFlight.get(item.id);
   if (!promise) {
-    promise = load(item, vaultId)
+    promise = load(item)
       .then((url) => {
         previews.set(item.id, url);
         if (previews.size > MAX_PREVIEWS) {
@@ -61,7 +58,15 @@ export function clearPreviewUrls(): void {
 }
 
 export async function decryptMeta(item: MediaItem): Promise<MediaMeta> {
-  const json = await cryptoCall('decryptText', { encrypted: item.encryptedMeta, nonce: item.metaNonce });
+  let json: string | null | undefined;
+  try {
+    const key = await keyRefOf(item);
+    [json] = await cryptoCall('decryptMetas', {
+      items: [{ mediaId: item.id, key, encrypted: item.encryptedMeta, nonce: item.metaNonce }],
+    });
+  } catch {
+    return {};
+  }
   if (!json) return {};
   try {
     return JSON.parse(json) as MediaMeta;
@@ -90,14 +95,10 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 };
 
 /** Decrypt the original file and hand it to the browser's download manager. */
-export async function downloadOriginal(item: MediaItem, vaultId: string): Promise<void> {
-  const [links, meta] = await Promise.all([mediaApi.urls(item.id, vaultId), decryptMeta(item)]);
+export async function downloadOriginal(item: MediaItem): Promise<void> {
+  const [links, meta] = await Promise.all([mediaApi.urls(item.id), decryptMeta(item)]);
   const ciphertext = await fetchEncrypted(links.originalUrl, { maxBytes: MAX_DOWNLOAD_BYTES });
-  const plain = await cryptoCall(
-    'decryptBlob',
-    { encryptedDek: item.encryptedDek, dekNonce: item.dekNonce, iv: links.originalIv, data: ciphertext },
-    [ciphertext],
-  );
+  const plain = await decryptTier(item, 'original', links.originalIv, ciphertext, [ciphertext]);
 
   const fallback = `${item.id}.${item.mediaType === 'video' ? 'mp4' : 'jpg'}`;
   // Only the last path segment: a stored name must never steer where the file lands

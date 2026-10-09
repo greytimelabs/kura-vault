@@ -3,12 +3,12 @@
 // =============================================================================
 //
 // Source of truth:
-//   backend/src/database/migrations/1775240947512-InitialSchema.ts
-//   backend/src/modules/*/entities/*.entity.ts   (9 files; agree exactly with the migration)
+//   backend/src/database/migrations/1791600000000-InitialSchema.ts
+//   backend/src/modules/*/entities/*.entity.ts   (10 files; agree with the migration)
 //   backend/src/common/types/index.ts            (enums)
 //
 // This file DOCUMENTS the schema; it is not executed. The ORM is TypeORM, not
-// Prisma. Enum names match the Postgres types TypeORM generates.
+// Prisma. Enum names match the Postgres types in the migration.
 //
 //   View:      paste into https://dbdiagram.io  (or Import > DBML)
 //   Validate:  npx -p @dbml/cli dbml2sql docs/database/schema.dbml --postgres
@@ -16,30 +16,29 @@
 // -----------------------------------------------------------------------------
 // Where this file differs from the live database
 // -----------------------------------------------------------------------------
-// Two Refs at the bottom are NOT enforced by the database. The columns exist as
-// bare uuid with no FOREIGN KEY constraint. They are drawn here (grey lines)
+// One Ref at the bottom is NOT enforced by the database. The column exists as
+// bare uuid with no FOREIGN KEY constraint. It is drawn here (grey line)
 // because the relationship is real in application code:
-//   albums.cover_media_id        > media.id   [delete: set null]
-//   invite_codes.used_by_user_id > users.id   [delete: set null]
-// The other 10 Refs are real constraints from the migration, all
-// ON DELETE CASCADE / ON UPDATE NO ACTION.
+//   albums.cover_media_id > media.id   [delete: set null]
 //
-// Two things DBML cannot express, both on albums:
-//   uq_albums_liked_owner_vault is a PARTIAL unique index (WHERE kind = 'liked').
-//   chk_albums_kind is a CHECK constraint. See the albums table note.
+// Things DBML cannot express:
+//   uq_users_single_owner        PARTIAL unique index on users(role) WHERE role = 'owner'
+//   uq_vault_members_creator     PARTIAL unique index on vault_members(vault_id) WHERE role = 'creator'
+//   uq_albums_liked_owner_vault  PARTIAL unique index (WHERE kind = 'liked')
+//   chk_vault_members_role, chk_albums_kind   CHECK constraints; see the table notes
 //
 // -----------------------------------------------------------------------------
 // Known issues (recorded here, not fixed)
 // -----------------------------------------------------------------------------
-// 1. docs/design/0001-system-design.md §5.2 is stale. It lists 7 tables (no
-//    refresh_tokens or invite_codes), leaves out the soft-delete, login-lockout
-//    and *_nonce columns, still has media favorite/archive flags, and says
-//    Prisma. Trust this file, not that doc.
-// 2. Deleting a key_group cascades away its media_vault_access rows. Any media
-//    row whose only access row was in that vault is orphaned, along with its
-//    S3 blobs. Nothing cleans it up, and nobody can decrypt it anymore.
+// 1. docs/design/0001-system-design.md §5.2 describes an older schema. Trust
+//    this file, not that doc.
+// 2. Nothing deletes media, vaults or users yet. When a vault row goes, its
+//    media rows cascade away but the blobs in storage are left behind.
 // 3. media.file_size_bytes is bigint. The pg driver returns bigint as a
 //    string, but the entity types the field as number.
+// 4. Nothing checks in the database that every media row has at least one
+//    wrapped key (media.key_wrapped_vault or an album_media.key_wrapped). The
+//    API enforces it on upload and on removal from an album.
 // =============================================================================
 
 Project kura_vault {
@@ -47,12 +46,14 @@ Project kura_vault {
   Note: '''
   **Kura Vault**: an end-to-end encrypted photo/video vault.
 
-  - Blobs live in S3, encrypted client-side with a per-media DEK.
-  - Each vault (`key_groups`) has a KEK derived from its passphrase with Argon2id.
-    The server never sees the passphrase or the KEK.
-  - `media_vault_access` stores the DEK wrapped under each vault's KEK, one row
-    per (media x vault). Sharing a photo into a vault adds a row there.
-    The blob is never re-encrypted.
+  - Blobs live in S3, encrypted client-side with a random key per item.
+  - Every key in this database is wrapped. An item's key is wrapped under its
+    vault's key and under the key of each album it is in; an album key under
+    the vault key; vault and album keys are sealed to each user's public key;
+    a user's private keys are encrypted under their master passphrase.
+  - Sharing adds one row holding the vault or album key sealed to the
+    recipient. Nothing is re-encrypted. Removing the row removes the access
+    and the key.
   - Anything user-meaningful (vault labels, album names, filenames, GPS) is
     ciphertext + nonce. Only structural fields stay plaintext for querying.
   - Likes are per user: each user has a private Liked album in each vault.
@@ -64,13 +65,28 @@ Project kura_vault {
 // -----------------------------------------------------------------------------
 
 Enum users_role_enum {
-  owner
-  viewer
+  owner  [note: 'The one account that manages users. Gives no access to anyone else\'s vaults']
+  member
 }
 
-Enum user_vault_access_permission_enum {
-  admin
+Enum users_access_level_enum {
+  full    [note: 'May create vaults of their own']
+  limited [note: 'Only what is shared with them']
+}
+
+Enum users_status_enum {
+  active
+  restricted [note: 'Cannot sign in; refused on every request']
+}
+
+Enum vault_members_role_enum {
+  creator [note: 'Created the vault. The only one who may share it or its albums']
+  member  [note: 'The vault was shared with them']
+}
+
+Enum share_permission_enum {
   view
+  write [note: 'May also add items']
 }
 
 Enum media_media_type_enum {
@@ -79,158 +95,115 @@ Enum media_media_type_enum {
 }
 
 Enum albums_kind_enum {
-  regular [note: 'Shared by every member of the vault']
+  regular [note: 'Seen by every member of the vault; can be shared on its own']
   liked   [note: 'One per user per vault, private to that user']
 }
 
 // -----------------------------------------------------------------------------
-// Devices & auth
+// Accounts
 // -----------------------------------------------------------------------------
 
 Table users {
-  id                    uuid            [pk, default: `uuid_generate_v4()`]
-  name                  varchar(100)    [not null]
-  device_id             varchar(255)    [not null, unique]
-  password_hash         text            [not null, note: 'bcrypt. API login credential, NOT the vault passphrase']
-  role                  users_role_enum [not null, default: 'viewer']
-  is_active             boolean         [not null, default: true]
-  last_login_at         timestamptz
-  failed_login_attempts integer         [not null, default: 0]
-  locked_until          timestamptz     [note: 'Login lockout after repeated failures']
-  created_at            timestamptz     [not null, default: `now()`]
-  updated_at            timestamptz     [not null, default: `now()`]
+  id                     uuid                    [pk, note: 'Chosen before the row exists: the key material is bound to it']
+  username               varchar(32)             [not null, unique, note: 'Lowercase. The only thing the server knows a person by']
+  password_hash          text                    [not null, note: 'bcrypt. Opens the API only; decrypts nothing']
+  role                   users_role_enum         [not null, default: 'member']
+  access_level           users_access_level_enum [not null, default: 'limited']
+  status                 users_status_enum       [not null, default: 'active']
+  kdf_salt               text                    [not null, note: 'Argon2id salt for the master passphrase. Not secret']
+  encrypted_private_keys text                    [not null, note: 'X25519 and Ed25519 private keys, encrypted on the device under the master passphrase']
+  private_keys_nonce     text                    [not null]
+  public_enc_key         text                    [not null, note: 'X25519. Vault and album keys are sealed to it']
+  public_sign_key        text                    [not null, note: 'Ed25519. Verifies what this user shares']
+  key_cert               text                    [note: 'The owner\'s signature over id, username and both public keys. NULL until verified: nothing can be shared with the user before']
+  last_login_at          timestamptz
+  failed_login_attempts  integer                 [not null, default: 0]
+  locked_until           timestamptz             [note: 'Login lockout after repeated failures']
+  created_at             timestamptz             [not null, default: `now()`]
+  updated_at             timestamptz             [not null, default: `now()`]
 
   Note: '''
-  Despite the name, this is a **devices** table: one row per registered device,
-  which logs in with device_id + password. MAX_DEVICES = 10 is enforced in
-  application code (auth.service.ts), not by the database.
+  One row per account on this server. There is no sign-up: the owner is
+  created once with the server's setup key, everyone else from an invite.
+  `uq_users_single_owner` allows exactly one owner. MAX_USERS = 10 is enforced
+  in application code.
+  '''
+}
 
-  Liked albums hang off this table, so likes are per device: one person on two
-  devices has two separate Liked albums.
+Table user_invites {
+  id                     uuid                    [pk, note: 'Chosen by the owner\'s client: the sealed secret is bound to it']
+  user_id                uuid                    [not null, unique, note: 'The id the new user will have. Not an FK: the user does not exist yet']
+  username               varchar(32)             [not null, unique]
+  access_level           users_access_level_enum [not null, default: 'limited']
+  token_hash             varchar(64)             [not null, note: 'SHA-256 of a token derived from the link\'s secret. The secret itself never reaches the server']
+  owner_secret_encrypted text                    [not null, note: 'The link\'s secret sealed to the owner, so their client can verify the new keys']
+  key_binding            text                    [note: 'HMAC by the invitee over their id, username and public keys, keyed from the link\'s secret']
+  created_by             uuid                    [not null]
+  expires_at             timestamptz             [not null]
+  used_at                timestamptz
+  created_at             timestamptz             [not null, default: `now()`]
+
+  Note: '''
+  One invitation from the owner. Single use, 24 hours. The row outlives
+  acceptance until the owner's client has verified the new user's keys and
+  stored their certificate; then it is deleted.
   '''
 }
 
 Table refresh_tokens {
-  id         uuid         [pk, default: `uuid_generate_v4()`]
+  id         uuid         [pk, default: `gen_random_uuid()`]
   token_hash varchar(128) [not null, unique, note: 'SHA-256 of the token. Plaintext is never stored']
   user_id    uuid         [not null]
-  device_id  varchar(255) [not null, note: 'Plain copy, not an FK to users.device_id']
+  username   varchar(255) [not null, note: 'Plain copy, not an FK to users.username']
   expires_at timestamptz  [not null]
   is_revoked boolean      [not null, default: false]
   created_at timestamptz  [not null, default: `now()`]
 
-  Note: 'Hashed JWT refresh tokens, one row per issued token.'
+  indexes {
+    user_id [name: 'idx_refresh_tokens_user']
+  }
+
+  Note: 'Hashed refresh tokens, one row per issued token. All of a user\'s rows are revoked when they are restricted.'
 }
 
 // -----------------------------------------------------------------------------
 // Vaults
 // -----------------------------------------------------------------------------
 
-Table key_groups {
-  id               uuid        [pk, default: `uuid_generate_v4()`]
-  kek_salt         text        [not null, note: 'Argon2id salt, base64. Not secret: sent to clients to derive the KEK']
-  kek_verify       text        [not null, note: 'The vault UUID encrypted under the KEK. The client decrypts it to check the passphrase']
-  kek_verify_nonce text        [not null]
-  label_encrypted  text        [note: 'Vault name encrypted under the KEK. The server cannot read it']
-  label_nonce      text
-  sort_order       integer     [not null, default: 0]
-  created_at       timestamptz [not null, default: `now()`]
+Table vaults {
+  id              uuid        [pk, note: 'Chosen by the client: the key wraps and the label are bound to it']
+  created_by      uuid        [not null]
+  label_encrypted text        [note: 'Vault name encrypted under the vault key. The server cannot read it']
+  label_nonce     text
+  sort_order      integer     [not null, default: 0]
+  created_at      timestamptz [not null, default: `now()`]
 
-  Note: '''
-  **The vault.** Each row is one passphrase-protected compartment with its own KEK.
-  There is no updated_at column.
-  '''
+  Note: 'A compartment with a random key. The key itself is only ever in vault_members, wrapped per user.'
 }
 
-Table user_vault_access {
-  user_id      uuid                              [not null]
-  key_group_id uuid                              [not null]
-  permission   user_vault_access_permission_enum [not null, default: 'view']
-  created_at   timestamptz                       [not null, default: `now()`]
+Table vault_members {
+  vault_id    uuid                    [not null]
+  user_id     uuid                    [not null]
+  role        vault_members_role_enum [not null]
+  permission  share_permission_enum   [not null, default: 'view']
+  wrapped_key text                    [not null, note: 'The vault key sealed to this user\'s public key. For the creator, what is sealed is itself encrypted under the vault passphrase']
+  kdf_salt    text                    [note: 'Creator only: Argon2id salt for the vault passphrase']
+  granted_by  uuid                    [note: 'Member only: who shared the vault']
+  grant_sig   text                    [note: 'Member only: the sharer\'s signature over the sealed key']
+  created_at  timestamptz             [not null, default: `now()`]
 
   indexes {
-    (user_id, key_group_id) [pk]
-  }
-
-  Note: 'Which devices can open which vaults, and with what permission.'
-}
-
-Table invite_codes {
-  id              uuid         [pk, default: `uuid_generate_v4()`]
-  code_hash       varchar(128) [not null, unique, note: 'SHA-256 of the invite code. Plaintext is never stored']
-  key_group_id    uuid         [not null]
-  expires_at      timestamptz  [not null]
-  is_used         boolean      [not null, default: false]
-  used_by_user_id uuid         [note: 'NO FK constraint in the database. See the unenforced Ref below']
-  created_at      timestamptz  [not null, default: `now()`]
-
-  Note: 'Invite codes that grant a new device access to a vault. Single use, with an expiry.'
-}
-
-// -----------------------------------------------------------------------------
-// Media
-// -----------------------------------------------------------------------------
-
-Table media {
-  // Structural metadata. Plaintext so the server can query it.
-  id               uuid                  [pk, default: `uuid_generate_v4()`]
-  captured_at      timestamptz
-  media_type       media_media_type_enum [not null]
-  file_size_bytes  bigint                [note: 'pg driver returns a string; the entity types it as number']
-  width            integer
-  height           integer
-  duration_seconds integer
-  aspect_ratio     "double precision"    [note: 'float in the entity']
-  year_month       varchar(7)            [note: "e.g. '2024-03'"]
-
-  // S3 object keys for the encrypted blobs
-  s3_key_thumb     text                  [not null]
-  s3_key_preview   text                  [not null]
-  s3_key_original  text                  [not null]
-
-  // IVs. The same for every vault, because the DEK is the same.
-  thumb_iv         text                  [not null]
-  preview_iv       text                  [not null]
-  original_iv      text                  [not null]
-
-  // Soft delete. Likes are per user, so they live in albums, not here.
-  is_deleted       boolean               [not null, default: false]
-  deleted_at       timestamptz
-
-  // Both are @CreateDateColumn, so they hold the same value on insert
-  uploaded_at      timestamptz           [not null, default: `now()`]
-  created_at       timestamptz           [not null, default: `now()`]
-
-  indexes {
-    year_month  [name: 'idx_media_yearmonth']
-    captured_at [name: 'idx_media_captured']
+    (vault_id, user_id) [pk]
+    user_id             [name: 'idx_vault_members_user']
   }
 
   Note: '''
-  One row per encrypted photo or video. There is **no key_group_id** here: the
-  only link to a vault is through `media_vault_access`.
-  '''
-}
+  Who can open a vault, and their own wrapped copy of its key. Deleting a row
+  removes both the access and the key.
 
-Table media_vault_access {
-  id             uuid [pk, default: `uuid_generate_v4()`]
-  media_id       uuid [not null]
-  key_group_id   uuid [not null]
-  encrypted_dek  text [not null, note: 'The DEK wrapped under this vault\'s KEK. Base64, ~64 bytes']
-  dek_nonce      text [not null]
-  encrypted_meta text [note: 'Sensitive metadata (filename, GPS, camera, tags) as JSON, encrypted under the KEK']
-  meta_nonce     text
-
-  indexes {
-    (media_id, key_group_id) [unique, name: 'uq_media_vault']
-    media_id                 [name: 'idx_mva_media']
-    key_group_id             [name: 'idx_mva_vault']
-  }
-
-  Note: '''
-  **Envelope-encryption fan-out.** One row per (media x vault), each holding the
-  same DEK wrapped under that vault's KEK. Uses a surrogate uuid PK plus a unique
-  constraint on (media_id, key_group_id). There are no timestamp columns.
+  `uq_vault_members_creator`: one creator per vault.
+  `chk_vault_members_role`: a creator row has `kdf_salt` and no grant fields;
+  a member row has both grant fields and no `kdf_salt`.
   '''
 }
 
@@ -239,43 +212,66 @@ Table media_vault_access {
 // -----------------------------------------------------------------------------
 
 Table albums {
-  id             uuid             [pk, default: `uuid_generate_v4()`]
-  key_group_id   uuid             [not null]
+  id             uuid             [pk, note: 'Chosen by the client for a regular album (its key and name are bound to it)']
+  vault_id       uuid             [not null]
   kind           albums_kind_enum [not null, default: 'regular']
-  owner_user_id  uuid             [note: 'NULL = shared with every vault member. Set = private to that user (the Liked album)']
-  name_encrypted text             [note: 'Album name encrypted under the KEK. The server cannot read it. NULL for the Liked album']
+  owner_user_id  uuid             [note: 'NULL for regular albums. Set = private to that user (the Liked album)']
+  name_encrypted text             [note: 'Album name encrypted under the album key. NULL for the Liked album']
   name_nonce     text
+  key_wrapped    text             [note: 'The album key wrapped under the vault key, so vault members open every album. NULL for Liked']
+  key_nonce      text
   cover_media_id uuid             [note: 'NO FK constraint in the database. See the unenforced Ref below']
   sort_order     integer          [not null, default: 0]
   media_count    integer          [not null, default: 0, note: 'Denormalized counter kept by app code. No trigger']
+  created_by     uuid
   created_at     timestamptz      [not null, default: `now()`]
   updated_at     timestamptz      [not null, default: `now()`]
 
   indexes {
-    key_group_id                  [name: 'idx_albums_vault']
-    (owner_user_id, key_group_id) [unique, name: 'uq_albums_liked_owner_vault']
+    vault_id                  [name: 'idx_albums_vault']
+    (owner_user_id, vault_id) [unique, name: 'uq_albums_liked_owner_vault']
   }
 
   Note: '''
   Albums belong to exactly one vault, and come in two kinds:
-  - `regular`: shared by everyone with access to the vault. Admins manage them.
-  - `liked`: one per (user x vault), private to that user. It holds the photos
-    they liked, so two members of a shared vault keep separate likes. Created on
-    first use, and changed only through the like/unlike endpoints.
+  - `regular`: seen by everyone with access to the vault, and shareable on its
+    own through `album_members`.
+  - `liked`: one per (user x vault), private to that user. It has no key and
+    no name. Created on first use, and changed only through the like/unlike
+    endpoints.
 
   `uq_albums_liked_owner_vault` is partial: `WHERE kind = 'liked'`.
-  `chk_albums_kind` CHECK: a regular album has a name and nonce; a liked album
-  has an owner.
+  `chk_albums_kind` CHECK: a regular album has a name, a wrapped key and their
+  nonces; a liked album has an owner.
 
   The server cannot see the photos, but it can see which media each user liked.
   '''
 }
 
+Table album_members {
+  album_id    uuid                  [not null]
+  user_id     uuid                  [not null]
+  permission  share_permission_enum [not null, default: 'view']
+  wrapped_key text                  [not null, note: 'The album key sealed to this user\'s public key']
+  granted_by  uuid                  [not null]
+  grant_sig   text                  [not null, note: 'The sharer\'s signature over the sealed key']
+  created_at  timestamptz           [not null, default: `now()`]
+
+  indexes {
+    (album_id, user_id) [pk]
+    user_id             [name: 'idx_album_members_user']
+  }
+
+  Note: 'One album shared with one user who need not have the rest of the vault. `write` allows uploading into the album.'
+}
+
 Table album_media {
-  album_id   uuid        [not null]
-  media_id   uuid        [not null]
-  sort_order integer     [not null, default: 0]
-  added_at   timestamptz [not null, default: `now()`]
+  album_id    uuid        [not null]
+  media_id    uuid        [not null]
+  key_wrapped text        [note: 'The item\'s key wrapped under the album key. NULL in a Liked album']
+  key_nonce   text
+  sort_order  integer     [not null, default: 0]
+  added_at    timestamptz [not null, default: `now()`]
 
   indexes {
     (album_id, media_id) [pk]
@@ -284,57 +280,116 @@ Table album_media {
   }
 
   Note: '''
-  Join table for the album <-> media many-to-many relationship. A row in a
-  user's Liked album means that user liked the photo.
+  Which items are in which album, and for a regular album the item's key as
+  the album's members can unwrap it. A row in a user's Liked album means that
+  user liked the photo.
   '''
 }
 
 // -----------------------------------------------------------------------------
-// Relationships: real FK constraints from the migration (all ON DELETE CASCADE)
+// Media
 // -----------------------------------------------------------------------------
 
-Ref FK_3ddc983c5f7bcf132fd8732c3f4: refresh_tokens.user_id         > users.id      [delete: cascade]
-Ref FK_4910d83415fcd0df7bd4f0cbb5d: user_vault_access.user_id      > users.id      [delete: cascade]
-Ref FK_a1e3cdaccb729fa2476a30fa9fa: user_vault_access.key_group_id > key_groups.id [delete: cascade]
-Ref FK_a03d62d3b04f42adcd2d09d9e41: invite_codes.key_group_id      > key_groups.id [delete: cascade]
-Ref FK_64d98a3c63875d3c957a062b3a7: media_vault_access.media_id     > media.id      [delete: cascade]
-Ref FK_50ca7a61b6b287ff989883006b8: media_vault_access.key_group_id > key_groups.id [delete: cascade]
-Ref FK_ffbffeb6f4466fc3799f14dad35: albums.key_group_id            > key_groups.id [delete: cascade]
-Ref FK_0637f371ceb575dc9f235828b66: albums.owner_user_id           > users.id      [delete: cascade]
-Ref FK_846915f9ddbc3350c2ea28b1989: album_media.album_id           > albums.id     [delete: cascade]
-Ref FK_e846eea26bfbc6b3c3252a641a1: album_media.media_id           > media.id      [delete: cascade]
+Table media {
+  id                uuid                  [pk, note: 'Issued by upload/init: the key, blobs and metadata are bound to it']
+  vault_id          uuid                  [not null]
+  uploaded_by       uuid
+
+  // Structural metadata. Plaintext so the server can query it.
+  captured_at       timestamptz
+  media_type        media_media_type_enum [not null]
+  file_size_bytes   bigint                [note: 'pg driver returns a string; the entity types it as number']
+  width             integer
+  height            integer
+  duration_seconds  integer
+  aspect_ratio      "double precision"    [note: 'float in the entity']
+  year_month        varchar(7)            [note: "e.g. '2024-03'"]
+
+  // S3 object keys for the encrypted blobs
+  s3_key_thumb      text                  [not null]
+  s3_key_preview    text                  [not null]
+  s3_key_original   text                  [not null]
+
+  thumb_iv          text                  [not null]
+  preview_iv        text                  [not null]
+  original_iv       text                  [not null]
+
+  key_wrapped_vault text                  [note: 'The item\'s key wrapped under the vault key. NULL when uploaded by someone who had only an album']
+  key_nonce_vault   text
+  encrypted_meta    text                  [note: 'Sensitive metadata (filename, GPS) as JSON, encrypted under the item\'s own key']
+  meta_nonce        text
+
+  // Soft delete. Likes are per user, so they live in albums, not here.
+  is_deleted        boolean               [not null, default: false]
+  deleted_at        timestamptz
+
+  // Both are @CreateDateColumn, so they hold the same value on insert
+  uploaded_at       timestamptz           [not null, default: `now()`]
+  created_at        timestamptz           [not null, default: `now()`]
+
+  indexes {
+    (vault_id, captured_at) [name: 'idx_media_vault_captured']
+    year_month              [name: 'idx_media_yearmonth']
+  }
+
+  Note: '''
+  One row per encrypted photo or video, in exactly one vault. Its key is
+  stored wrapped: here under the vault key, and in `album_media` under the key
+  of each album it is in. An item with no vault wrap is still readable by
+  vault members through its album.
+  '''
+}
 
 // -----------------------------------------------------------------------------
-// Relationships: NOT ENFORCED by the database (bare uuid columns, no constraint)
+// Relationships: real FK constraints from the migration
+// -----------------------------------------------------------------------------
+
+Ref fk_refresh_tokens_user:    refresh_tokens.user_id   > users.id  [delete: cascade]
+Ref fk_user_invites_creator:   user_invites.created_by  > users.id  [delete: cascade]
+Ref fk_vaults_creator:         vaults.created_by        > users.id  [delete: cascade]
+Ref fk_vault_members_vault:    vault_members.vault_id   > vaults.id [delete: cascade]
+Ref fk_vault_members_user:     vault_members.user_id    > users.id  [delete: cascade]
+Ref fk_vault_members_granter:  vault_members.granted_by > users.id  [delete: cascade]
+Ref fk_albums_vault:           albums.vault_id          > vaults.id [delete: cascade]
+Ref fk_albums_owner:           albums.owner_user_id     > users.id  [delete: cascade]
+Ref fk_albums_creator:         albums.created_by        > users.id  [delete: set null]
+Ref fk_album_members_album:    album_members.album_id   > albums.id [delete: cascade]
+Ref fk_album_members_user:     album_members.user_id    > users.id  [delete: cascade]
+Ref fk_album_members_granter:  album_members.granted_by > users.id  [delete: cascade]
+Ref fk_media_vault:            media.vault_id           > vaults.id [delete: cascade]
+Ref fk_media_uploader:         media.uploaded_by        > users.id  [delete: set null]
+Ref fk_album_media_album:      album_media.album_id     > albums.id [delete: cascade]
+Ref fk_album_media_media:      album_media.media_id     > media.id  [delete: cascade]
+
+// -----------------------------------------------------------------------------
+// Relationships: NOT ENFORCED by the database (bare uuid column, no constraint)
 // Drawn so the diagram shows the real relationship. The intended behavior is
-// set null: deleting a photo blanks the album cover rather than deleting the
-// album, and deleting a user keeps the invite-code audit row.
+// set null: deleting a photo blanks the album cover rather than deleting the album.
 // -----------------------------------------------------------------------------
 
-Ref: albums.cover_media_id        > media.id [delete: set null, color: #9ca3af]
-Ref: invite_codes.used_by_user_id > users.id [delete: set null, color: #9ca3af]
+Ref: albums.cover_media_id > media.id [delete: set null, color: #9ca3af]
 
 // -----------------------------------------------------------------------------
 // Visual grouping
 // -----------------------------------------------------------------------------
 
-TableGroup devices_and_auth [color: #0f766e] {
+TableGroup accounts [color: #0f766e] {
   users
+  user_invites
   refresh_tokens
 }
 
-TableGroup vaults [color: #7c3aed] {
-  key_groups
-  user_vault_access
-  invite_codes
+TableGroup vaults_and_sharing [color: #7c3aed] {
+  vaults
+  vault_members
 }
 
 TableGroup media_library [color: #2563eb] {
   media
-  media_vault_access
 }
 
 TableGroup album_organization [color: #c2410c] {
   albums
+  album_members
   album_media
 }

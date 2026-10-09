@@ -4,11 +4,17 @@ class AppConstants {
   static const int maxPageSize = 100;
 
   // Secure storage keys
-  static const String keyAccessToken = 'access_token';
-  static const String keyRefreshToken = 'refresh_token';
-  static const String keyDeviceId = 'device_id';
-  static const String keyUserId = 'user_id';
-  static const String keyUserRole = 'user_role';
+  static const String keyAccounts = 'accounts';
+  static const String keyActiveAccountId = 'active_account_id';
+
+  // Single-session keys from before multi-account; deleted on launch
+  static const List<String> legacySessionKeys = [
+    'access_token',
+    'refresh_token',
+    'device_id',
+    'user_id',
+    'user_role',
+  ];
 
   // Cache
   static const int thumbCacheMaxCount = 5000;

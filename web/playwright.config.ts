@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { API_PORT, API_URL, WEB_PORT, WEB_URL } from './tests/e2e/env';
+import { API_PORT, API_URL, MULTI_WEB_PORT, MULTI_WEB_URL, WEB_PORT, WEB_URL } from './tests/e2e/env';
 
 const firefoxServer = process.env.PW_FIREFOX_WS;
 
@@ -52,6 +52,18 @@ export default defineConfig({
       timeout: 120_000,
       reuseExistingServer: false,
       env: { API_PROXY_TARGET: `http://localhost:${API_PORT}` },
+    },
+    {
+      // The multi-server build: no proxy, it calls the API cross-origin like a hosted client.
+      // Its policy must also let it reach the test API, which is plain http on this machine.
+      command: `vite build --outDir dist-multi && vite preview --outDir dist-multi --port ${MULTI_WEB_PORT} --strictPort`,
+      url: MULTI_WEB_URL,
+      timeout: 120_000,
+      reuseExistingServer: false,
+      env: {
+        VITE_MULTI_SERVER: 'true',
+        VITE_S3_ORIGIN: `https: http://localhost:${API_PORT} http://127.0.0.1:${API_PORT}`,
+      },
     },
   ],
 });

@@ -4,11 +4,12 @@ import chalk from 'chalk';
 import * as path from 'path';
 import { scanDirectory } from './scanner';
 import { processFile } from './processor';
-import { encryptBlob, generateDek, wrapDek, deriveKek, verifyKek, encryptMeta } from './encryptor';
+import { encryptMedia, openCreatorVaultKey, openSharedVaultKey, unlockAccount, unwrapAlbumKey } from './encryptor';
 import { uploadAllTiers } from './uploader';
 import { ApiClient } from './api-client';
 import { ProgressTracker } from './progress';
-import { CliOptions } from './types';
+import { secret } from './prompt';
+import { CliOptions, Identity } from './types';
 
 const program = new Command();
 
@@ -17,10 +18,14 @@ program
   .description('Bulk upload tool for Kura Vault')
   .requiredOption('--source <path>', 'Source directory containing photos/videos')
   .requiredOption('--vault-id <uuid>', 'Target vault UUID')
-  .requiredOption('--passphrase <string>', 'Vault passphrase for encryption')
+  .option('--album-id <uuid>', 'Also put every file into this album of the vault')
   .requiredOption('--api-url <url>', 'Backend API URL (e.g., http://localhost:3000/api/v1)')
-  .requiredOption('--device-id <string>', 'Device ID for authentication')
-  .requiredOption('--password <string>', 'Device password for authentication')
+  .requiredOption('--username <string>', 'Username for authentication')
+  // The three secrets are asked for when not given. Prefer that, or the
+  // environment, to flags: flags are saved in shell history.
+  .option('--password <string>', 'Account password (or KURA_PASSWORD)')
+  .option('--master-passphrase <string>', 'Master passphrase of the account (or KURA_MASTER_PASSPHRASE)')
+  .option('--passphrase <string>', 'Passphrase of the vault, for a vault you created (or KURA_VAULT_PASSPHRASE)')
   .option('--concurrency <number>', 'Number of concurrent uploads', '5')
   .option('--resume', 'Resume a previous migration', false)
   .action(run);
@@ -39,37 +44,68 @@ async function run(opts: CliOptions): Promise<void> {
   console.log('');
 
   // 1. Login
-  spinner.start('Authenticating...');
   const api = new ApiClient(opts.apiUrl);
   try {
-    await api.login(opts.deviceId, opts.password);
+    const password = await secret('Password', opts.password, 'KURA_PASSWORD');
+    spinner.start('Authenticating...');
+    await api.login(opts.username, password);
     spinner.succeed('Authenticated');
   } catch (err) {
     spinner.fail(`Authentication failed: ${(err as Error).message}`);
     process.exit(1);
   }
 
-  // 2. Derive KEK from passphrase
-  spinner.start('Deriving encryption key from passphrase...');
-  let kek: Buffer;
+  // 2. Unlock the account, then the vault. Nothing here is sent to the server.
+  let identity: Identity;
+  let vaultKey: Buffer;
+  let album: { id: string; key: Buffer } | undefined;
   try {
+    const account = await api.getAccount();
+    const masterPassphrase = await secret('Master passphrase', opts.masterPassphrase, 'KURA_MASTER_PASSPHRASE');
+    spinner.start('Unlocking your keys...');
+    identity = await unlockAccount(account, masterPassphrase);
+    spinner.succeed('Keys unlocked');
+
     const vault = (await api.listVaults()).find((v) => v.id === opts.vaultId);
     if (!vault) {
-      spinner.fail(`Vault not found: ${opts.vaultId}`);
+      spinner.fail(`Vault not found, or not shared with this account: ${opts.vaultId}`);
+      process.exit(1);
+    }
+    if (vault.role !== 'creator' && vault.permission !== 'write') {
+      spinner.fail('This vault is shared with you for viewing only');
       process.exit(1);
     }
 
-    kek = await deriveKek(opts.passphrase, Buffer.from(vault.kekSalt, 'base64'));
-
-    // Uploading under the wrong key would leave media nobody can open
-    if (!verifyKek(kek, vault)) {
-      kek.fill(0);
-      spinner.fail('Wrong passphrase for this vault');
-      process.exit(1);
+    if (vault.role === 'creator') {
+      const passphrase = await secret('Vault passphrase', opts.passphrase, 'KURA_VAULT_PASSPHRASE');
+      spinner.start('Opening the vault...');
+      // Uploading under the wrong key would leave media nobody can open
+      const opened = await openCreatorVaultKey(vault, passphrase, identity);
+      if (!opened) {
+        spinner.fail('Wrong passphrase for this vault');
+        process.exit(1);
+      }
+      vaultKey = opened;
+    } else {
+      // Shared with this account: the key arrives sealed to its public key, signed by the sharer
+      spinner.start('Opening the vault...');
+      vaultKey = openSharedVaultKey(vault, identity);
     }
-    spinner.succeed('Encryption key derived and verified');
+
+    if (opts.albumId) {
+      const row = (await api.listAlbums(opts.vaultId)).find((a) => a.id === opts.albumId && a.kind === 'regular');
+      if (!row || !row.keyWrapped || !row.keyNonce) {
+        spinner.fail(`Album not found in this vault: ${opts.albumId}`);
+        process.exit(1);
+      }
+      album = {
+        id: row.id,
+        key: unwrapAlbumKey({ id: row.id, keyWrapped: row.keyWrapped, keyNonce: row.keyNonce }, opts.vaultId, vaultKey),
+      };
+    }
+    spinner.succeed('Vault opened');
   } catch (err) {
-    spinner.fail(`Could not derive encryption key: ${(err as Error).message}`);
+    spinner.fail(`Could not open the vault: ${(err as Error).message}`);
     process.exit(1);
   }
 
@@ -115,41 +151,38 @@ async function run(opts: CliOptions): Promise<void> {
       // Generate thumbnails/previews
       const processed = await processFile(fileInfo);
 
-      // Generate DEK and encrypt all tiers
-      const dek = generateDek();
-      const encThumb = encryptBlob(processed.thumbnail, dek);
-      const encPreview = encryptBlob(processed.preview, dek);
-      const encOriginal = encryptBlob(processed.original, dek);
+      // The server issues the item's id first: every ciphertext made below is bound to it
+      progress.updateStatus(filePath, 'uploading');
+      const initResult = await api.uploadInit({
+        vaultId: opts.vaultId,
+        ...(album ? { albumId: album.id } : {}),
+        mediaType: fileInfo.type,
+        fileSizeBytes: fileInfo.fileSizeBytes,
+      });
 
-      // Wrap DEK with KEK
-      const wrapped = wrapDek(dek, kek);
-
-      // Encrypt metadata (including GPS if available)
-      const meta = encryptMeta(
-        {
+      // A fresh key for this file, wrapped under the vault key (and the album's);
+      // the tiers and the metadata (including GPS if available) are encrypted under it
+      const encrypted = encryptMedia({
+        mediaId: initResult.mediaId,
+        vaultId: opts.vaultId,
+        vaultKey,
+        album,
+        thumb: processed.thumbnail,
+        preview: processed.preview,
+        original: processed.original,
+        meta: {
           filename: path.basename(filePath),
           originalPath: filePath,
           ...(fileInfo.gpsLatitude != null && { gpsLatitude: fileInfo.gpsLatitude }),
           ...(fileInfo.gpsLongitude != null && { gpsLongitude: fileInfo.gpsLongitude }),
         },
-        kek,
-      );
-
-      // Init upload via API
-      progress.updateStatus(filePath, 'uploading');
-      const initResult = await api.uploadInit(opts.vaultId, fileInfo.type, {
-        capturedAt: fileInfo.capturedAt,
-        width: fileInfo.width,
-        height: fileInfo.height,
-        durationSeconds: fileInfo.durationSeconds,
-        fileSizeBytes: fileInfo.fileSizeBytes,
       });
 
       // Upload to S3
       await uploadAllTiers(initResult.uploadUrls, {
-        thumb: encThumb.encrypted,
-        preview: encPreview.encrypted,
-        original: encOriginal.encrypted,
+        thumb: encrypted.thumb.encrypted,
+        preview: encrypted.preview.encrypted,
+        original: encrypted.original.encrypted,
       });
 
       // Complete upload via API
@@ -157,13 +190,21 @@ async function run(opts: CliOptions): Promise<void> {
       await api.uploadComplete({
         mediaId: initResult.mediaId,
         vaultId: opts.vaultId,
-        encryptedDek: wrapped.encryptedDek.toString('base64'),
-        dekNonce: wrapped.nonce.toString('base64'),
-        thumbIv: encThumb.iv.toString('base64'),
-        previewIv: encPreview.iv.toString('base64'),
-        originalIv: encOriginal.iv.toString('base64'),
-        encryptedMeta: meta.encrypted,
-        metaNonce: meta.nonce,
+        ...(album ? { albumId: album.id } : {}),
+        mediaType: fileInfo.type,
+        // Structural metadata the server sorts and pages by
+        ...(fileInfo.capturedAt ? { capturedAt: fileInfo.capturedAt } : {}),
+        ...(fileInfo.width && fileInfo.height ? { width: fileInfo.width, height: fileInfo.height } : {}),
+        ...(fileInfo.durationSeconds ? { durationSeconds: Math.round(fileInfo.durationSeconds) } : {}),
+        fileSizeBytes: fileInfo.fileSizeBytes,
+        keyWrappedVault: encrypted.keyWrappedVault,
+        keyNonceVault: encrypted.keyNonceVault,
+        ...(encrypted.keyWrappedAlbum ? { keyWrappedAlbum: encrypted.keyWrappedAlbum, keyNonceAlbum: encrypted.keyNonceAlbum } : {}),
+        thumbIv: encrypted.thumb.iv.toString('base64'),
+        previewIv: encrypted.preview.iv.toString('base64'),
+        originalIv: encrypted.original.iv.toString('base64'),
+        encryptedMeta: encrypted.encryptedMeta,
+        metaNonce: encrypted.metaNonce,
       });
 
       progress.updateStatus(filePath, 'done', initResult.mediaId);
@@ -207,7 +248,10 @@ async function run(opts: CliOptions): Promise<void> {
     console.log(chalk.yellow(`\nRun with --resume to retry ${summary.failed} failed files.`));
   }
 
-  // Zero out KEK
-  kek.fill(0);
+  // Zero out every key
+  vaultKey.fill(0);
+  album?.key.fill(0);
+  identity.encSk.fill(0);
+  identity.signSk.fill(0);
   progress.close();
 }

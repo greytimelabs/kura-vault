@@ -20,6 +20,16 @@ export class AlbumMedia {
   @JoinColumn({ name: 'media_id' })
   media: Media;
 
+  /**
+   * The item's key wrapped under the album key. Null in a Liked album, which
+   * has no key of its own.
+   */
+  @Column({ name: 'key_wrapped', type: 'text', nullable: true })
+  keyWrapped: string | null;
+
+  @Column({ name: 'key_nonce', type: 'text', nullable: true })
+  keyNonce: string | null;
+
   @Column({ name: 'sort_order', type: 'int', default: 0 })
   sortOrder: number;
 

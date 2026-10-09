@@ -127,4 +127,7 @@ class MediaCubit extends Cubit<MediaState> {
     items[index] = item;
     emit(state.copyWith(items: items));
   }
+
+  /// Forget everything loaded. Used when the account changes.
+  void reset() => emit(const MediaState());
 }

@@ -4,9 +4,11 @@ enum AlbumStatus { initial, loading, loaded, error }
 
 class AlbumItem {
   final String id;
-  final String kind; // 'regular' (shared) or 'liked' (this device's likes)
-  final String? nameEncrypted; // null for the Liked album
+  final String kind; // 'regular', or 'liked' (this account's likes)
+  final String? nameEncrypted; // under the album key; null for the Liked album
   final String? nameNonce;
+  final String? keyWrapped; // the album key under the vault key; null for Liked
+  final String? keyNonce;
   final String? coverMediaId;
   final int sortOrder;
   final int mediaCount;
@@ -16,6 +18,8 @@ class AlbumItem {
     this.kind = 'regular',
     this.nameEncrypted,
     this.nameNonce,
+    this.keyWrapped,
+    this.keyNonce,
     this.coverMediaId,
     this.sortOrder = 0,
     this.mediaCount = 0,
@@ -28,6 +32,8 @@ class AlbumItem {
         kind: json['kind'] as String? ?? 'regular',
         nameEncrypted: json['nameEncrypted'] as String?,
         nameNonce: json['nameNonce'] as String?,
+        keyWrapped: json['keyWrapped'] as String?,
+        keyNonce: json['keyNonce'] as String?,
         coverMediaId: json['coverMediaId'] as String?,
         sortOrder: json['sortOrder'] as int? ?? 0,
         mediaCount: json['mediaCount'] as int? ?? 0,

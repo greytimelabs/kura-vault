@@ -12,16 +12,20 @@ it never sees a passphrase, a key, or a decrypted file.
 
 ## What it does
 
-- **Client-side encryption.** AES-256-GCM with a random key per file, wrapped
-  by a vault key derived from your passphrase with Argon2id.
-- **Multiple vaults.** Each vault has its own passphrase. Entering a passphrase
-  opens only the vaults it matches.
-- **Shared media without duplication.** One encrypted blob can belong to
-  several vaults; only its small wrapped key is stored per vault.
+- **Client-side encryption.** AES-256-GCM with a random key per file. Every
+  key is stored only wrapped; your private keys are encrypted under a master
+  passphrase (Argon2id) that never leaves your device.
+- **Multiple vaults.** Each vault you create has its own passphrase. Entering
+  one opens only the vaults it matches; the others are not even listed.
+- **Sharing without sharing a passphrase.** Share a whole vault or a single
+  album with another user, for viewing or for adding. Their copy of the key is
+  sealed to their public key on your device; nothing is re-encrypted and the
+  server only relays ciphertext.
 - **Direct-to-storage transfers.** Uploads and downloads use short-lived
   pre-signed URLs, so media bytes never pass through the API.
-- **Family sharing.** The owner invites other devices to a vault with one-time
-  invite codes; invited devices are read-only viewers.
+- **Owner-managed accounts.** No sign-up. The owner adds users with one-time
+  invite links, decides who may create vaults, and can cut an account off at
+  once. The owner cannot read anyone's vault.
 - **Bulk import.** A CLI encrypts and uploads an existing library with resume.
 
 ## Repository layout
@@ -58,7 +62,8 @@ pnpm install
 pnpm dev                             # http://localhost:5173
 ```
 
-The first device to register becomes the owner. Full instructions, including
+The server prints a setup key on first start; the web client uses it to create
+the owner account. Full instructions, including
 the mobile app, the import CLI and the tests, are in
 [docs/getting-started.md](docs/getting-started.md).
 

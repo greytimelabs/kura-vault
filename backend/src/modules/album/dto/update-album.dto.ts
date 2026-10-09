@@ -1,12 +1,13 @@
-import { IsString, IsOptional, IsUUID, IsNumber } from 'class-validator';
+import { IsOptional, IsUUID, IsNumber } from 'class-validator';
+import { IsEncoded } from '../../../common/validation';
 
 export class UpdateAlbumDto {
   @IsOptional()
-  @IsString()
+  @IsEncoded(1024)
   nameEncrypted?: string;
 
   @IsOptional()
-  @IsString()
+  @IsEncoded(32)
   nameNonce?: string;
 
   @IsOptional()

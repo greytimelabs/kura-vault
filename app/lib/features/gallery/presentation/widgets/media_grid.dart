@@ -24,8 +24,7 @@ class MediaGrid extends StatelessWidget {
             child: EncryptedImage(
               mediaId: item.id,
               thumbUrl: item.thumbUrl,
-              encryptedDek: item.encryptedDek,
-              dekNonce: item.dekNonce,
+              mediaKey: item.key,
               thumbIv: item.thumbIv,
               fit: BoxFit.cover,
             ),

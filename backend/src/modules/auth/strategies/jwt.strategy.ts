@@ -5,7 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
-import { JwtPayload } from '../../../common/types';
+import { JwtPayload, UserStatus } from '../../../common/types';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -21,9 +21,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload): Promise<JwtPayload> {
-    // Verify user still exists and is active
+    // Checked on every request, so restricting a user takes effect immediately
+    // and role or access-level changes never wait for a token to expire
     const user = await this.userRepo.findOne({
-      where: { id: payload.sub, deviceId: payload.deviceId, isActive: true },
+      where: { id: payload.sub, username: payload.username, status: UserStatus.ACTIVE },
     });
 
     if (!user) {
@@ -32,8 +33,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     return {
       sub: user.id,
-      deviceId: user.deviceId,
+      username: user.username,
       role: user.role,
+      accessLevel: user.accessLevel,
     };
   }
 }

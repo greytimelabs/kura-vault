@@ -1,29 +1,36 @@
 import { clsx } from 'clsx';
-import { Images, Lock, LockKeyhole, Settings, SquareLibrary } from 'lucide-react';
+import { Images, Lock, LockKeyhole, LogOut, Settings, SquareLibrary } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { AccountMenu } from './AccountMenu';
 import { ScrollContext } from './ScrollContext';
-import { useAutoLock } from './useAutoLock';
 import { UploadButton, UploadDropzone } from '../upload/UploadControls';
 import { UploadPanel } from '../upload/UploadPanel';
 import { IconButton } from '@/components/ui/IconButton';
-import { lockVault } from '@/lib/session';
-import { useIsOwner } from '@/state/authStore';
-import { useVaultStore } from '@/state/vaultStore';
+import { MULTI_SERVER } from '@/lib/config';
+import { closeVault, lockVault } from '@/lib/session';
+import { useCanWrite, useVaultStore } from '@/state/vaultStore';
 
-const NAV = [
+const VAULT_NAV = [
   { to: '/timeline', label: 'Timeline', icon: Images },
   { to: '/albums', label: 'Albums', icon: SquareLibrary },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
-/** Frame around every screen of an unlocked vault: navigation, top bar, uploads. */
+/** Frame around every screen of an open vault or shared album: navigation, top bar, uploads. */
 export function AppShell() {
-  const isOwner = useIsOwner();
+  const canWrite = useCanWrite();
   const vaultLabel = useVaultStore((s) => s.label);
+  const albumOnlyId = useVaultStore((s) => s.albumId);
+  // With one album shared there is no timeline and no album list, just the album
+  const NAV = albumOnlyId
+    ? [
+        { to: `/albums/${albumOnlyId}`, label: 'Album', icon: Images },
+        { to: '/settings', label: 'Settings', icon: Settings },
+      ]
+    : VAULT_NAV;
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
   const { pathname } = useLocation();
-  useAutoLock();
 
   // A new screen starts at the top. Opening the viewer changes only the query
   // string, so the grid underneath keeps its place.
@@ -73,10 +80,14 @@ export function AppShell() {
               {vaultLabel}
             </span>
           </p>
-          {isOwner && <UploadButton />}
-          <IconButton label="Lock vault" onClick={lockVault}>
+          {canWrite && <UploadButton />}
+          <IconButton label="Close vault" onClick={closeVault}>
+            <LogOut className="size-5" />
+          </IconButton>
+          <IconButton label="Lock" onClick={lockVault}>
             <Lock className="size-5" />
           </IconButton>
+          {MULTI_SERVER && <AccountMenu compact />}
         </header>
 
         <ScrollContext.Provider value={scrollElement}>
@@ -107,7 +118,7 @@ export function AppShell() {
         </nav>
       </div>
 
-      {isOwner && <UploadDropzone />}
+      {canWrite && <UploadDropzone />}
       <UploadPanel />
     </div>
   );

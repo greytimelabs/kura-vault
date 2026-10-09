@@ -1,9 +1,11 @@
 import 'package:equatable/equatable.dart';
+import '../../core/crypto/models.dart';
 
 enum MediaStatus { initial, loading, loaded, loadingMore, error }
 
 class MediaItem {
   final String id;
+  final String vaultId;
   final String mediaType;
   final String? capturedAt;
   final String? yearMonth;
@@ -12,15 +14,17 @@ class MediaItem {
   final double? aspectRatio;
   final int? durationSeconds;
   final String thumbIv;
-  final String encryptedDek;
-  final String dekNonce;
+  /// The item's wrapped key as this account can open it. Null when nobody
+  /// wrapped it for a key this account holds.
+  final MediaKeyRef? key;
   final String? encryptedMeta;
   final String? metaNonce;
   final String thumbUrl;
-  final bool isLiked; // in this device's Liked album for the current vault
+  final bool isLiked; // in this account's Liked album for the current vault
 
   MediaItem({
     required this.id,
+    required this.vaultId,
     required this.mediaType,
     this.capturedAt,
     this.yearMonth,
@@ -29,8 +33,7 @@ class MediaItem {
     this.aspectRatio,
     this.durationSeconds,
     required this.thumbIv,
-    required this.encryptedDek,
-    required this.dekNonce,
+    this.key,
     this.encryptedMeta,
     this.metaNonce,
     required this.thumbUrl,
@@ -39,6 +42,7 @@ class MediaItem {
 
   factory MediaItem.fromJson(Map<String, dynamic> json) => MediaItem(
         id: json['id'] as String,
+        vaultId: json['vaultId'] as String,
         mediaType: json['mediaType'] as String,
         capturedAt: json['capturedAt'] as String?,
         yearMonth: json['yearMonth'] as String?,
@@ -47,8 +51,7 @@ class MediaItem {
         aspectRatio: (json['aspectRatio'] as num?)?.toDouble(),
         durationSeconds: json['durationSeconds'] as int?,
         thumbIv: json['thumbIv'] as String,
-        encryptedDek: json['encryptedDek'] as String,
-        dekNonce: json['dekNonce'] as String,
+        key: MediaKeyRef.fromJson(json['key'], json['vaultId'] as String),
         encryptedMeta: json['encryptedMeta'] as String?,
         metaNonce: json['metaNonce'] as String?,
         thumbUrl: json['thumbUrl'] as String,
@@ -57,6 +60,7 @@ class MediaItem {
 
   MediaItem copyWith({bool? isLiked}) => MediaItem(
         id: id,
+        vaultId: vaultId,
         mediaType: mediaType,
         capturedAt: capturedAt,
         yearMonth: yearMonth,
@@ -65,8 +69,7 @@ class MediaItem {
         aspectRatio: aspectRatio,
         durationSeconds: durationSeconds,
         thumbIv: thumbIv,
-        encryptedDek: encryptedDek,
-        dekNonce: dekNonce,
+        key: key,
         encryptedMeta: encryptedMeta,
         metaNonce: metaNonce,
         thumbUrl: thumbUrl,

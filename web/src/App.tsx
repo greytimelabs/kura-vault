@@ -6,15 +6,22 @@ import { Toaster } from '@/components/ui/Toaster';
 import { FullPageSpinner } from '@/components/ui/StateMessage';
 import { AlbumPage } from '@/features/albums/AlbumPage';
 import { AlbumsPage } from '@/features/albums/AlbumsPage';
+import { JoinPage } from '@/features/auth/JoinPage';
 import { LoginPage } from '@/features/auth/LoginPage';
-import { RegisterPage } from '@/features/auth/RegisterPage';
+import { ServerPage } from '@/features/auth/ServerPage';
+import { SetupPage } from '@/features/auth/SetupPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { AppShell } from '@/features/shell/AppShell';
+import { useAutoLock } from '@/features/shell/useAutoLock';
 import { TimelinePage } from '@/features/timeline/TimelinePage';
+import { SpacesPage } from '@/features/unlock/SpacesPage';
 import { UnlockPage } from '@/features/unlock/UnlockPage';
+import { UsersPage } from '@/features/users/UsersPage';
 import { queryClient } from '@/lib/queryClient';
-import { bootstrapSession } from '@/lib/session';
-import { useAuthStore } from '@/state/authStore';
+import { MULTI_SERVER } from '@/lib/config';
+import { bootstrapSession, signInPath } from '@/lib/session';
+import { useAccountStore } from '@/state/accountStore';
+import { useAuthStore, useIsOwner } from '@/state/authStore';
 import { applyTheme, usePreferences } from '@/state/preferences';
 import { useVaultStore } from '@/state/vaultStore';
 
@@ -26,6 +33,8 @@ let bootstrap: Promise<void> | null = null;
 /** Signed-in screens. Everyone else goes to the sign-in page. */
 function RequireAuth() {
   const status = useAuthStore((s) => s.status);
+  // Multi-server: which sign-in screen depends on the active account
+  useAccountStore((s) => s.activeId);
   if (status === 'loading') {
     return (
       <div className="h-dvh">
@@ -33,12 +42,15 @@ function RequireAuth() {
       </div>
     );
   }
-  return status === 'authenticated' ? <Outlet /> : <Navigate to="/login" replace />;
+  return status === 'authenticated' ? <Outlet /> : <Navigate to={signInPath()} replace />;
 }
 
-/** Sign-in and register. Pointless once signed in. */
+/** Sign-in and first-run setup. Pointless once signed in. */
 function PublicOnly() {
   const status = useAuthStore((s) => s.status);
+  const { search } = useLocation();
+  // Multi-server: a signed-in user comes back here to add another account
+  const adding = MULTI_SERVER && new URLSearchParams(search).get('add') === '1';
   if (status === 'loading') {
     return (
       <div className="h-dvh">
@@ -46,22 +58,48 @@ function PublicOnly() {
       </div>
     );
   }
-  return status === 'authenticated' ? <Navigate to="/unlock" replace /> : <Outlet />;
+  return status === 'authenticated' && !adding ? <Navigate to="/unlock" replace /> : <Outlet />;
 }
 
-/** Screens that need vault keys. Remembers where the user was heading. */
+/** Where an open vault or shared album starts. */
+function useHome(): string {
+  const albumId = useVaultStore((s) => s.albumId);
+  return albumId ? `/albums/${albumId}` : HOME;
+}
+
+/** Screens that need an open vault or album. Remembers where the user was heading. */
 function RequireUnlocked() {
   const unlocked = useVaultStore((s) => s.unlocked);
+  const albumId = useVaultStore((s) => s.albumId);
   const location = useLocation();
-  // Only the path: an open-photo parameter means nothing after the keys are gone
-  return unlocked ? <Outlet /> : <Navigate to="/unlock" replace state={{ from: location.pathname }} />;
+  const closedByUser = useVaultStore((s) => s.closedByUser);
+  // Only the path: an open-photo parameter means nothing after the keys are gone.
+  // After a deliberate close there is nowhere to return to: the next vault may be another one.
+  if (!unlocked) {
+    return <Navigate to="/unlock" replace state={closedByUser ? undefined : { from: location.pathname }} />;
+  }
+  // With one album shared, the timeline and the album list do not exist
+  const reachable = !albumId || location.pathname === `/albums/${albumId}` || location.pathname === '/settings';
+  return reachable ? <Outlet /> : <Navigate to={`/albums/${albumId}`} replace />;
 }
 
+/** Master passphrase first, then the choice of what to open. */
 function UnlockRoute() {
+  const accountUnlocked = useVaultStore((s) => s.accountUnlocked);
   const unlocked = useVaultStore((s) => s.unlocked);
+  const albumId = useVaultStore((s) => s.albumId);
+  const home = useHome();
   const location = useLocation();
   const from = (location.state as { from?: string } | null)?.from;
-  return unlocked ? <Navigate to={from ?? HOME} replace /> : <UnlockPage />;
+  if (unlocked) return <Navigate to={albumId ? home : (from ?? home)} replace />;
+  return accountUnlocked ? <SpacesPage /> : <UnlockPage />;
+}
+
+/** User management: the owner, with their keys loaded to verify and invite people. */
+function OwnerOnly() {
+  const accountUnlocked = useVaultStore((s) => s.accountUnlocked);
+  const isOwner = useIsOwner();
+  return accountUnlocked && isOwner ? <Outlet /> : <Navigate to="/unlock" replace />;
 }
 
 /** Follow the operating system's light/dark setting while the choice is "System". */
@@ -79,6 +117,7 @@ function useSystemTheme() {
 
 export function App() {
   useSystemTheme();
+  useAutoLock();
 
   useEffect(() => {
     bootstrap ??= bootstrapSession();
@@ -90,11 +129,17 @@ export function App() {
         <BrowserRouter>
           <Routes>
             <Route element={<PublicOnly />}>
+              {MULTI_SERVER && <Route path="/server" element={<ServerPage />} />}
               <Route path="/login" element={<LoginPage />} />
-              <Route path="/register" element={<RegisterPage />} />
+              <Route path="/setup" element={<SetupPage />} />
             </Route>
+            {/* An invite link works whoever is or is not signed in on this browser */}
+            <Route path="/join" element={<JoinPage />} />
             <Route element={<RequireAuth />}>
               <Route path="/unlock" element={<UnlockRoute />} />
+              <Route element={<OwnerOnly />}>
+                <Route path="/users" element={<UsersPage />} />
+              </Route>
               <Route element={<RequireUnlocked />}>
                 <Route element={<AppShell />}>
                   <Route path="/timeline" element={<TimelinePage />} />
