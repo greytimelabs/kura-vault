@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { InviteUserDialog } from './InviteUserDialog';
 import { Button } from '@/components/ui/Button';
+import { Select } from '@/components/ui/Select';
 import { ErrorState, FullPageSpinner } from '@/components/ui/StateMessage';
 import { errorMessage } from '@/lib/api/client';
 import { userApi } from '@/lib/api/endpoints';
@@ -102,7 +103,7 @@ export function UsersPage() {
                   </div>
                   {user.role !== 'owner' && (
                     <div className="flex shrink-0 items-center gap-2">
-                      <select
+                      <Select
                         aria-label={`Access for ${user.username}`}
                         value={user.accessLevel}
                         disabled={busyId === user.userId}
@@ -113,11 +114,11 @@ export function UsersPage() {
                             `${user.username} now has ${event.target.value} access`,
                           )
                         }
-                        className="h-9 rounded-lg border border-line bg-surface px-2 text-sm text-ink"
+                        size="sm"
                       >
                         <option value="limited">Limited</option>
                         <option value="full">Full</option>
-                      </select>
+                      </Select>
                       {user.status === 'active' ? (
                         <Button size="sm" variant="danger" loading={busyId === user.userId} onClick={() => restrict(user)}>
                           Restrict

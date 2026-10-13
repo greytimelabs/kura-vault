@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
+import { Select } from '@/components/ui/Select';
 import { Spinner } from '@/components/ui/Spinner';
 import { ensureAlbumKey } from '@/lib/albums';
 import { errorMessage } from '@/lib/api/client';
@@ -112,12 +113,12 @@ export function ShareDialog({ open, onOpenChange, target }: ShareDialogProps) {
         <div className="flex flex-wrap items-end gap-2">
           <label className="min-w-0 flex-1">
             <span className="mb-1.5 block text-sm font-medium text-ink">Share with</span>
-            <select
+            <Select
               aria-label="Share with"
               value={userId}
               onChange={(event) => setUserId(event.target.value)}
               disabled={people.isPending || candidates.length === 0}
-              className="h-10 w-full rounded-lg border border-line bg-surface px-3 text-sm text-ink"
+              className="w-full"
             >
               <option value="">{candidates.length === 0 && !people.isPending ? 'Nobody to share with' : 'Choose a user'}</option>
               {candidates.map((user) => (
@@ -125,20 +126,20 @@ export function ShareDialog({ open, onOpenChange, target }: ShareDialogProps) {
                   {user.username}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
-          <select
+          <Select
             aria-label="Permission"
             value={permission}
             onChange={(event) => setPermission(event.target.value as SharePermission)}
-            className="h-10 rounded-lg border border-line bg-surface px-3 text-sm text-ink"
+            className="shrink-0"
           >
             {PERMISSIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
-          </select>
+          </Select>
           <Button variant="primary" disabled={!userId} loading={busy === 'add'} onClick={share}>
             Share
           </Button>
@@ -163,7 +164,7 @@ export function ShareDialog({ open, onOpenChange, target }: ShareDialogProps) {
               {current.map((member) => (
                 <li key={member.userId} className="flex items-center gap-2 py-2" data-testid={`member-${member.username}`}>
                   <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{member.username}</span>
-                  <select
+                  <Select
                     aria-label={`Permission for ${member.username}`}
                     value={member.permission}
                     disabled={busy !== null}
@@ -174,14 +175,15 @@ export function ShareDialog({ open, onOpenChange, target }: ShareDialogProps) {
                         `Updated ${member.username}`,
                       )
                     }
-                    className="h-8 rounded-lg border border-line bg-surface px-2 text-[13px] text-ink"
+                    size="sm"
+                    className="shrink-0"
                   >
                     {PERMISSIONS.map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                   <Button
                     size="sm"
                     variant="danger"

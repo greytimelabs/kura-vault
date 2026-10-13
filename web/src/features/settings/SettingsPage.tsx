@@ -6,6 +6,7 @@ import { ShareDialog } from '../sharing/ShareDialog';
 import { PageHeader } from '../shell/PageHeader';
 import { CreateVaultDialog } from '../unlock/CreateVaultDialog';
 import { Button } from '@/components/ui/Button';
+import { Select } from '@/components/ui/Select';
 import { clearThumbUrls } from '@/lib/media/thumbLoader';
 import { clearThumbStore } from '@/lib/media/thumbStore';
 import { MULTI_SERVER } from '@/lib/config';
@@ -77,18 +78,17 @@ export function SettingsPage() {
           title="Lock automatically"
           detail="Every key is wiped after this long without activity in this tab."
           action={
-            <select
+            <Select
               aria-label="Lock automatically after"
               value={autoLockMinutes}
               onChange={(event) => setAutoLockMinutes(Number(event.target.value))}
-              className="h-10 rounded-lg border border-line bg-surface px-3 text-sm text-ink"
             >
               {AUTO_LOCK_OPTIONS.map((minutes) => (
                 <option key={minutes} value={minutes}>
                   {autoLockLabel(minutes)}
                 </option>
               ))}
-            </select>
+            </Select>
           }
         />
         <Row
