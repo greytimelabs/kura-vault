@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:uuid/uuid.dart';
 import '../../core/crypto/aad.dart';
 import '../../core/crypto/crypto_service.dart';
 import '../../core/crypto/identity_crypto.dart';
 import '../../core/crypto/key_derivation.dart';
 import '../../core/crypto/cache_crypto.dart';
+import '../../core/crypto/media_worker.dart';
 import '../../core/crypto/models.dart';
 import 'vault_crypto_state.dart';
 
@@ -169,6 +171,22 @@ class VaultCryptoCubit extends Cubit<VaultCryptoState> {
       passphrase: passphrase,
       salt: b64d(account.kdfSalt),
     );
+    try {
+      return await unlockAccountWithKey(account: account, masterKey: masterKey);
+    } finally {
+      CryptoService.zero(masterKey);
+    }
+  }
+
+  /// Load the account's private keys with the master key itself: what the
+  /// passphrase derives to, as fingerprint or face unlock keeps it. The same
+  /// checks apply as with the passphrase. False means the key does not open
+  /// this account (the passphrase was changed since). The caller zeroes
+  /// [masterKey].
+  Future<bool> unlockAccountWithKey({
+    required AccountKeys account,
+    required Uint8List masterKey,
+  }) async {
     final ({Uint8List encSk, Uint8List signSk, Uint8List ownerSignPk}) bundle;
     try {
       bundle = IdentityCrypto.decryptBundle(
@@ -179,8 +197,6 @@ class VaultCryptoCubit extends Cubit<VaultCryptoState> {
       );
     } catch (_) {
       return false;
-    } finally {
-      CryptoService.zero(masterKey);
     }
 
     final encPk = await IdentityCrypto.encPublicOf(bundle.encSk);
@@ -205,11 +221,120 @@ class VaultCryptoCubit extends Cubit<VaultCryptoState> {
     return true;
   }
 
+  /// The master key [passphrase] derives to, if it is this account's master
+  /// passphrase; null if it is not. Changes nothing that is unlocked. Used to
+  /// switch on fingerprint or face unlock; the caller zeroes the result.
+  static Future<Uint8List?> masterKeyFor({
+    required AccountKeys account,
+    required String passphrase,
+  }) async {
+    final masterKey = await KeyDerivation.deriveKek(
+      passphrase: passphrase,
+      salt: b64d(account.kdfSalt),
+    );
+    try {
+      final bundle = IdentityCrypto.decryptBundle(
+        masterKey: masterKey,
+        userId: account.id,
+        encrypted: account.encryptedPrivateKeys,
+        nonce: account.privateKeysNonce,
+      );
+      CryptoService.zero(bundle.encSk);
+      CryptoService.zero(bundle.signSk);
+      return masterKey;
+    } catch (_) {
+      CryptoService.zero(masterKey);
+      return null;
+    }
+  }
+
   /// True when the owner this account trusts is the account itself.
   bool get isTrustRoot =>
       IdentityCrypto.equalBytes(_me.signPk, _me.ownerSignPk);
 
   // ── Vaults ──
+
+  /// A creator's own copy of a vault key has two layers: the vault passphrase
+  /// inside, their public key outside. Either secret alone opens nothing.
+  /// [salt], [innerIv], [ephSk] and [iv] exist for test vectors only.
+  static Future<({String wrappedKey, String kdfSalt})> wrapCreatorGrant({
+    required Uint8List vaultKey,
+    required String passphrase,
+    required String vaultId,
+    required String userId,
+    required Uint8List encPk,
+    Uint8List? salt,
+    Uint8List? innerIv,
+    Uint8List? ephSk,
+    Uint8List? iv,
+  }) async {
+    final kdfSalt = salt ?? KeyDerivation.generateSalt();
+    final passphraseKey =
+        await KeyDerivation.deriveKek(passphrase: passphrase, salt: kdfSalt);
+    try {
+      final nonce = innerIv ?? CryptoService.generateIv();
+      final inner = Uint8List.fromList([
+        ...nonce,
+        ...CryptoService.encrypt(
+          plaintext: vaultKey,
+          key: passphraseKey,
+          iv: nonce,
+          aad: Aad.vaultKeyPassphrase(vaultId, userId),
+        ),
+      ]);
+      final sealed = await IdentityCrypto.seal(
+        recipientPk: encPk,
+        plaintext: inner,
+        aad: Aad.vaultKey(vaultId, userId),
+        ephSk: ephSk,
+        iv: iv,
+      );
+      return (wrappedKey: b64e(sealed), kdfSalt: b64e(kdfSalt));
+    } finally {
+      CryptoService.zero(passphraseKey);
+    }
+  }
+
+  /// Make a vault. [vault] is what the server stores; [match] holds the new
+  /// key so the caller can open the vault straight away with [selectVault],
+  /// and must be given to [discardMatches] otherwise.
+  Future<({NewVault vault, MatchedVault match})> createVault({
+    required String passphrase,
+    required String label,
+  }) async {
+    final me = _me;
+    final id = const Uuid().v4();
+    final key = CryptoService.generateKey();
+    try {
+      final grant = await wrapCreatorGrant(
+        vaultKey: key,
+        passphrase: passphrase,
+        vaultId: id,
+        userId: me.userId,
+        encPk: me.encPk,
+      );
+      final name = label.trim();
+      final encLabel =
+          name.isEmpty ? null : _encryptText(key, name, Aad.vaultLabel(id));
+      return (
+        vault: (
+          id: id,
+          wrappedKey: grant.wrappedKey,
+          kdfSalt: grant.kdfSalt,
+          labelEncrypted: encLabel?.encrypted,
+          labelNonce: encLabel?.nonce,
+        ),
+        match: MatchedVault(
+          vaultId: id,
+          key: key,
+          label: name.isEmpty ? 'New vault' : name,
+        ),
+      );
+    } catch (_) {
+      CryptoService.zero(key);
+      rethrow;
+    }
+  }
 
   /// Try the passphrase against EVERY vault this account created and return
   /// all that open.
@@ -491,6 +616,32 @@ class VaultCryptoCubit extends Cubit<VaultCryptoState> {
 
   bool hasAlbumKey(String albumId) => _albumKeys.containsKey(albumId);
 
+  /// Make an album in an open vault: a fresh key wrapped under the vault key,
+  /// and the name encrypted under the album key.
+  NewAlbum createAlbum({required String vaultId, required String name}) {
+    final vaultKey = _vaultKey(vaultId);
+    final id = const Uuid().v4();
+    final key = CryptoService.generateKey();
+    final wrapped = CryptoService.wrapKey(
+      key: key,
+      wrappingKey: vaultKey,
+      aad: Aad.albumKey(id, vaultId),
+    );
+    final encName = _encryptText(key, name, Aad.albumName(id));
+    _albumKeys[id] = key;
+    _albumVault[id] = vaultId;
+    return (
+      id: id,
+      keyWrapped: b64e(wrapped.wrapped),
+      keyNonce: b64e(wrapped.nonce),
+      nameEncrypted: encName.encrypted,
+      nameNonce: encName.nonce,
+    );
+  }
+
+  EncryptedText encryptAlbumName({required String albumId, required String name}) =>
+      _encryptText(_albumKey(albumId), name, Aad.albumName(albumId));
+
   // ── Media ──
 
   Uint8List _mediaKey(String mediaId, MediaKeyRef ref) {
@@ -528,6 +679,141 @@ class VaultCryptoCubit extends Cubit<VaultCryptoState> {
       );
     } finally {
       // Zero the item's key immediately
+      CryptoService.zero(mediaKey);
+    }
+  }
+
+  /// Like [decryptMedia], off the UI isolate. For previews and originals.
+  Future<Uint8List> decryptMediaInBackground({
+    required String mediaId,
+    required String tier,
+    required MediaKeyRef key,
+    required String ivB64,
+    required Uint8List encryptedBlob,
+  }) async {
+    final mediaKey = _mediaKey(mediaId, key);
+    try {
+      return await MediaWorker.decrypt(
+        key: mediaKey,
+        iv: b64d(ivB64),
+        aad: Aad.mediaBlob(mediaId, tier),
+        ciphertext: encryptedBlob,
+      );
+    } finally {
+      CryptoService.zero(mediaKey);
+    }
+  }
+
+  /// One fresh key per file; the three tiers and the metadata share it, each
+  /// with its own IV. The key is wrapped under the vault key when this
+  /// account holds it, and under the album key when the upload goes into an
+  /// album.
+  Future<EncryptedMedia> encryptMedia({
+    required String mediaId,
+    required String vaultId,
+    String? albumId,
+    required Uint8List thumb,
+    required Uint8List preview,
+    required Uint8List original,
+    required Map<String, Object?> meta,
+  }) async {
+    final vaultKey = _vaultKeys[vaultId];
+    final albumKey = albumId == null ? null : _albumKey(albumId);
+    if (vaultKey == null && albumKey == null) throw StateError('Vault is locked');
+
+    final key = CryptoService.generateKey();
+    try {
+      final encMeta = _encryptText(key, jsonEncode(meta), Aad.mediaMeta(mediaId));
+      final vaultWrap = vaultKey == null
+          ? null
+          : CryptoService.wrapKey(
+              key: key,
+              wrappingKey: vaultKey,
+              aad: Aad.mediaKeyVault(mediaId, vaultId),
+            );
+      final albumWrap = albumKey == null
+          ? null
+          : CryptoService.wrapKey(
+              key: key,
+              wrappingKey: albumKey,
+              aad: Aad.mediaKeyAlbum(mediaId, albumId!),
+            );
+      final tiers = await MediaWorker.encryptTiers(
+        key: key,
+        tiers: {'thumb': thumb, 'preview': preview, 'original': original},
+        aads: {
+          for (final tier in const ['thumb', 'preview', 'original'])
+            tier: Aad.mediaBlob(mediaId, tier),
+        },
+      );
+      return (
+        vaultKey: vaultWrap == null
+            ? null
+            : (wrapped: b64e(vaultWrap.wrapped), nonce: b64e(vaultWrap.nonce)),
+        albumKey: albumWrap == null
+            ? null
+            : (wrapped: b64e(albumWrap.wrapped), nonce: b64e(albumWrap.nonce)),
+        thumb: tiers['thumb']!,
+        preview: tiers['preview']!,
+        original: tiers['original']!,
+        encryptedMeta: encMeta.encrypted,
+        metaNonce: encMeta.nonce,
+      );
+    } finally {
+      CryptoService.zero(key);
+    }
+  }
+
+  /// An item's metadata as the JSON text it was stored as. Null when there is
+  /// none, no usable key, or it does not verify.
+  String? decryptMeta({
+    required String mediaId,
+    required MediaKeyRef? key,
+    required String? encrypted,
+    required String? nonce,
+  }) {
+    if (key == null) return null;
+    final Uint8List mediaKey;
+    try {
+      mediaKey = _mediaKey(mediaId, key);
+    } catch (_) {
+      return null;
+    }
+    try {
+      return _decryptText(encrypted, nonce, mediaKey, Aad.mediaMeta(mediaId));
+    } finally {
+      CryptoService.zero(mediaKey);
+    }
+  }
+
+  /// Wrap an existing item's key under another key this account holds: an
+  /// album's ([albumId]), to put the item in that album, or the vault's
+  /// ([vaultId]), for an item uploaded by someone who had only an album.
+  /// Exactly one of the two is given.
+  WrappedKey rewrapMediaKey({
+    required String mediaId,
+    required MediaKeyRef key,
+    String? albumId,
+    String? vaultId,
+  }) {
+    if ((albumId == null) == (vaultId == null)) {
+      throw ArgumentError('Give an album or a vault, not both');
+    }
+    final mediaKey = _mediaKey(mediaId, key);
+    try {
+      final wrapped = albumId != null
+          ? CryptoService.wrapKey(
+              key: mediaKey,
+              wrappingKey: _albumKey(albumId),
+              aad: Aad.mediaKeyAlbum(mediaId, albumId),
+            )
+          : CryptoService.wrapKey(
+              key: mediaKey,
+              wrappingKey: _vaultKey(vaultId!),
+              aad: Aad.mediaKeyVault(mediaId, vaultId),
+            );
+      return (wrapped: b64e(wrapped.wrapped), nonce: b64e(wrapped.nonce));
+    } finally {
       CryptoService.zero(mediaKey);
     }
   }
@@ -645,6 +931,17 @@ class VaultCryptoCubit extends Cubit<VaultCryptoState> {
   }) =>
       _share('album', albumId, _albumKey(albumId),
           Aad.albumKeyGrant(albumId, recipient.userId), recipient);
+
+  static EncryptedText _encryptText(Uint8List key, String text, Uint8List aad) {
+    final iv = CryptoService.generateIv();
+    final encrypted = CryptoService.encrypt(
+      plaintext: Uint8List.fromList(utf8.encode(text)),
+      key: key,
+      iv: iv,
+      aad: aad,
+    );
+    return (encrypted: b64e(encrypted), nonce: b64e(iv));
+  }
 
   /// Null when there is nothing to decrypt or the ciphertext does not verify.
   static String? _decryptText(

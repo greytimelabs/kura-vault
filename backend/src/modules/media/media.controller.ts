@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Put, Body, Param, Query,
-  UseGuards, ParseUUIDPipe,
+  UseGuards, ParseUUIDPipe, HttpCode, HttpStatus,
 } from '@nestjs/common';
 import { MediaService } from './media.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -10,6 +10,7 @@ import { UploadInitDto } from './dto/upload-init.dto';
 import { UploadCompleteDto } from './dto/upload-complete.dto';
 import { QueryMediaDto } from './dto/query-media.dto';
 import { SetVaultKeyDto } from './dto/vault-key.dto';
+import { DeleteMediaDto } from './dto/delete-media.dto';
 
 // No role guards here: what a caller may do is decided per vault and per album
 // by AccessService, inside the service.
@@ -26,6 +27,13 @@ export class MediaController {
   @Post('upload/complete')
   async completeUpload(@CurrentUser() user: JwtPayload, @Body() dto: UploadCompleteDto) {
     return this.mediaService.completeUpload(user.sub, dto);
+  }
+
+  /** One call for a whole selection. A POST because a DELETE with a body is not reliably delivered. */
+  @Post('delete')
+  @HttpCode(HttpStatus.OK)
+  async deleteMedia(@CurrentUser() user: JwtPayload, @Body() dto: DeleteMediaDto) {
+    return this.mediaService.deleteMedia(user.sub, dto.ids);
   }
 
   @Get()

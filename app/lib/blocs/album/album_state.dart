@@ -63,6 +63,7 @@ class AlbumState extends Equatable {
     );
   }
 
+  // `albums` (not its length) so a rename or a changed count emits a new state.
   @override
-  List<Object?> get props => [status, albums.length, errorMessage];
+  List<Object?> get props => [status, albums, errorMessage];
 }

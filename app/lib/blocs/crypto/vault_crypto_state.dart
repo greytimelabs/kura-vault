@@ -32,6 +32,10 @@ class VaultCryptoState extends Equatable {
     this.cacheKey,
   });
 
+  /// Has the whole vault and may change it: create albums, move items
+  /// between them. Someone with one album shared can only add to that album.
+  bool get canOrganise => canWrite && albumOnlyId == null;
+
   /// A vault or shared album is open.
   bool get isUnlocked => activeVaultId != null;
 

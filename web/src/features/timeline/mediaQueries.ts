@@ -1,8 +1,9 @@
 import { useInfiniteQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { albumApi, mediaApi, PAGE_SIZE } from '@/lib/api/endpoints';
+import { albumApi, DELETE_BATCH, mediaApi, PAGE_SIZE } from '@/lib/api/endpoints';
 import type { MediaItem, MediaPage } from '@/lib/api/types';
 import { prefetchThumbs } from '@/lib/media/thumbLoader';
+import { removeThumbCiphertext } from '@/lib/media/thumbStore';
 import { toast } from '@/state/toastStore';
 
 type MediaData = InfiniteData<MediaPage, number>;
@@ -133,6 +134,40 @@ export function useToggleLike(vaultId: string) {
       } catch {
         apply(!liked);
         toast(liked ? 'Could not like this photo' : 'Could not unlike this photo', 'error');
+      }
+    },
+    [queryClient, vaultId],
+  );
+}
+
+/**
+ * Erase items for good, on the server and in every list on screen. Throws if the
+ * server refuses; whatever was deleted before that is gone from the lists anyway.
+ */
+export function useDeleteMedia(vaultId: string) {
+  const queryClient = useQueryClient();
+
+  return useCallback(
+    async (ids: string[]) => {
+      const deleted: string[] = [];
+      try {
+        for (let start = 0; start < ids.length; start += DELETE_BATCH) {
+          const batch = ids.slice(start, start + DELETE_BATCH);
+          await mediaApi.remove(batch);
+          deleted.push(...batch);
+        }
+      } finally {
+        if (deleted.length > 0) {
+          const gone = new Set(deleted);
+          queryClient.setQueriesData<MediaData>({ queryKey: ['media', vaultId] }, (data) =>
+            mapItems(data, (items) => (items.some((m) => gone.has(m.id)) ? items.filter((m) => !gone.has(m.id)) : items)),
+          );
+          // The cached thumbnail is ciphertext, but there is nothing left for it to belong to
+          for (const id of deleted) void removeThumbCiphertext(id);
+          void queryClient.invalidateQueries({ queryKey: ['media', vaultId] });
+          void queryClient.invalidateQueries({ queryKey: ['albums', vaultId] });
+          void queryClient.invalidateQueries({ queryKey: ['albumCover', vaultId] });
+        }
       }
     },
     [queryClient, vaultId],

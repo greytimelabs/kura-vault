@@ -18,6 +18,8 @@ export const DB = {
 };
 
 export const S3_BUCKET = 'kura-vault-e2e';
+/** Where the API suite's storage stand-in listens. */
+export const API_STORAGE_PORT = 9178;
 export const S3_REGION = 'ap-south-1';
 
 /** What the server would otherwise generate and print at first start. */
@@ -48,8 +50,9 @@ export const backendEnv: Record<string, string> = {
   AWS_ACCESS_KEY_ID: 'e2e-access-key',
   AWS_SECRET_ACCESS_KEY: 'e2e-secret-key',
   S3_BUCKET_NAME: S3_BUCKET,
-  // Empty on purpose: stops backend/.env from pointing the run at a real R2 endpoint
-  S3_ENDPOINT: '',
+  // Empty by default on purpose: stops backend/.env from pointing the run at a real
+  // R2 endpoint. The API suite points it at its in-memory stand-in instead.
+  S3_ENDPOINT: process.env.E2E_S3_ENDPOINT ?? '',
   CORS_ORIGINS: `${WEB_URL},${MULTI_WEB_URL}`,
   // The suite drives three browsers at once from one address
   THROTTLE_TTL: '60',

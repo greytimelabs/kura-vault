@@ -152,8 +152,22 @@ password. For a backend on your machine use `http://10.0.2.2:3000` from the
 Android emulator, `http://localhost:3000` from the iOS simulator, or your
 machine's LAN address from a physical device. A server with no owner yet goes
 to the setup screen; "I have an invite link" joins with a link from the owner.
-The app is a viewer: uploading, creating vaults, managing users and sharing
-are done in the web client.
+The app does what the web client does, with these differences:
+
+- **Invite links are made in the web client.** The app's Users screen lists
+  pending invites and can cancel them, but does not create one.
+- **Photos only.** Videos are uploaded from the web client or the import CLI,
+  and a video's original is downloaded there too. The app shows a video's
+  poster frame and duration.
+- **100 MB per photo**, up and down: a file is encrypted in one piece, in
+  memory.
+- **On iOS the uploaded original is a JPEG** when the photo was taken in
+  another format (HEIC, the iPhone default): the system picker's plugin
+  converts it before the app sees it. Android uploads the file untouched.
+- **Uploads run while the app is open.** They pause in the background.
+- **Fingerprint or face unlock**, which a browser cannot offer. It is off
+  until switched on in Settings and replaces typing the master passphrase,
+  not a vault's. See [security](security.md) for what it keeps on the phone.
 
 More accounts, on the same or other servers, are added from the account
 button in the top bar. Switching account locks everything and asks for the
@@ -222,10 +236,32 @@ afterwards or prefix the command with a space if your shell supports that.
 | `web/` end-to-end | `pnpm test:e2e` | Docker (starts its own throwaway PostgreSQL and a fake storage server) |
 | `migration-cli/` | `pnpm test` | nothing |
 | `app/` | `flutter test` | Flutter |
+| `app/` against the web client | see below | Docker, and an iOS simulator or Android emulator |
 
 The crypto tests in `web/`, `migration-cli/` and `app/` all read
 [`crypto-vectors.json`](../crypto-vectors.json) from the repository root. See
 [crypto](crypto/README.md).
+
+The app's interop check runs the real app against a real backend and has the
+web client's own key handling read what the app wrote, and the reverse. It
+also deletes a photo, an album and a vault in the app and checks from the web
+side that they, and their files in storage, are gone:
+
+```bash
+cd web && pnpm exec tsx tests/interop/stack.ts          # leave running
+cd web && pnpm exec tsx tests/interop/web-side.ts seed
+cd app && flutter test integration_test/interop_test.dart -d <device>
+cd web && pnpm exec tsx tests/interop/web-side.ts verify
+```
+
+On the Android emulator, forward the two ports first:
+`adb reverse tcp:3100 tcp:3100 && adb reverse tcp:9177 tcp:9177`. Stop and
+start the stack between runs; it starts from an empty database.
+
+Fingerprint and face unlock has its own run against the same stack,
+`integration_test/biometric_test.dart`. It needs a simulator or emulator with
+a face or fingerprint enrolled, and a match sent from outside while it runs;
+the commands are at the top of that file.
 
 ## Environment reference
 

@@ -43,8 +43,10 @@ server sees passwords.
 | Passphrase guessing | Argon2id with 64 MiB memory cost per guess |
 | Someone learns a vault passphrase | Opens nothing without that account's private keys as well |
 | Someone looks at your unlocked app | Vaults you created are never listed; only the ones matching an entered passphrase open |
-| Lost or borrowed device | Keys are held in memory only and destroyed on lock, after 15 minutes idle, and when the app or tab closes |
+| Lost or borrowed device | Keys are held in memory only and destroyed on lock, after the chosen idle time (15 minutes at most), and when the app or tab closes. The one exception is the app's optional fingerprint or face unlock, described below |
 | A user should no longer have access | Unsharing or restricting deletes their wrapped keys and is enforced on their next request |
+| Something should no longer exist | Deleting erases the rows and the encrypted files from storage; a file storage could not erase at that moment is retried until it is gone |
+| Someone picks up an unlocked device and deletes a vault | Deleting a vault asks for its passphrase, checked on the device |
 
 ## What is not hidden
 
@@ -71,6 +73,14 @@ Other limits to be aware of:
   including items added afterwards. Key rotation is not built yet.
 - **Download links already issued stay valid for up to 60 seconds** after
   access is removed.
+- **Deleting cannot reach copies that already left.** A photo someone
+  downloaded or saved, a database or bucket backup the operator made, and
+  versions kept by a bucket with versioning switched on are not erased.
+  Deleting a user erases the vaults that user created, for everyone they were
+  shared with; the owner is shown how many before confirming.
+- **The vault passphrase asked for before deleting a vault is checked by the
+  client.** It stops someone holding an unlocked device. Someone holding the
+  creator's session token could call the API directly.
 - **Read versus write is enforced by the server only.** Anyone holding a key
   can encrypt under it; what stops a view-only user from uploading is the API.
 - **Whoever opens an invite link first becomes that user.** Send links over a
@@ -108,6 +118,46 @@ build in three ways, and anyone relying on one should know them:
   handles their passphrases.
 - **The policy is wider.** `connect-src` allows any `https:` origin, so it no
   longer limits where injected script could send data.
+
+The mobile apps add protections a browser cannot offer, and have limits of
+their own:
+
+- **Android blocks screenshots and screen recording** of the app, and shows a
+  blank card in the recent-apps list. iOS covers the app's window whenever it
+  is not active, so the app switcher never shows a photo or a passphrase.
+- **Nothing is in a device backup.** Android backup and device transfer are
+  off for the app; on iOS the tokens are kept for this device only.
+- **Time in the background counts toward the lock time.** The app locks when
+  it returns after longer than the chosen time (1, 5 or 15 minutes). iOS
+  suspends a backgrounded app, so the keys are wiped at that moment or when
+  the app is closed, not at the exact minute.
+- **Fingerprint or face unlock is optional, and off until switched on** in
+  Settings, per account. What it keeps on the phone is the account's master
+  key (what the master passphrase derives to): never the passphrase, never a
+  vault key. That key is encrypted by a hardware-held key (Android Keystore,
+  in StrongBox where the phone has one; the iOS Keychain with the Secure
+  Enclave) that is released only by a biometric match and never by the
+  device PIN. The check is bound to the key operation, not an "if" in the
+  app. The stored key is destroyed when a fingerprint or face is added or
+  changed, when the account signs out or is removed, and when the setting is
+  switched off; the master passphrase is asked for again every 7 days. Vault
+  passphrases are always typed, so the phone holds nothing that shows which
+  vaults exist. The trade-off: with it on, whoever can pass the phone's
+  biometric check (or force its owner to) can load the account's keys, which
+  opens everything shared with the account; vaults the account created still
+  need their passphrases.
+- **Picked photos pass through temporary storage.** The system photo picker,
+  the file picker and the camera hand the app a plaintext copy in its private
+  temporary folder. Each copy is deleted once it is uploaded or dismissed, or
+  when the vault locks, and anything left by a crash is deleted at the next
+  start. These are the only unencrypted files the app writes, apart from
+  the next point.
+- **A saved photo is no longer protected.** Saving to the gallery or to files
+  writes an ordinary file other apps, backups and cloud photo sync can read.
+  The app says so before the first save. On iOS, saving to files goes through
+  one temporary copy, deleted when the dialog closes.
+- **The app never asks to read the photo library.** It sees only what the
+  system picker returns, and may add to the library but not read it.
 
 Plain `http://` is refused by both clients except for local addresses
 (localhost and private IP ranges in the app, localhost only on the web),

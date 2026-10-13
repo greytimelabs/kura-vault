@@ -25,9 +25,13 @@ a physical device. Backend setup is in
 | `lib/core/accounts/` | Saved accounts (server + username), the active one, per-account tokens |
 | `lib/core/server/` | Server address parsing and the http-only-on-local-networks rule |
 | `lib/core/network/` | API client, endpoints, auth and error interceptors |
-| `lib/core/storage/` | Secure storage and the encrypted thumbnail cache |
-| `lib/blocs/` | Cubits: auth, vault, crypto, media, album |
-| `lib/features/` | Screens and widgets by feature: auth, gallery, albums, viewer, settings |
+| `lib/core/storage/` | Secure storage, the encrypted thumbnail cache, preferences, clean-up of picked files |
+| `lib/core/platform/` | Channels to the native code in `android/` and `ios/`: image processing, saving a file to the device, the key kept behind a fingerprint or face |
+| `lib/core/security/` | When fingerprint or face unlock is on offer, and when the master passphrase is asked for again |
+| `lib/core/widgets/` | The confirmation asked before anything is deleted |
+| `lib/blocs/` | Cubits: auth, vault, crypto, media, album, selection, upload |
+| `lib/features/` | Screens and widgets by feature: auth, gallery, albums, viewer, upload, sharing, users, settings |
+| `integration_test/` | The app against a real backend and the web client's crypto (see [getting started](../docs/getting-started.md#tests)) |
 | `lib/routing/` | Routes (`go_router`) |
 
 ## Test

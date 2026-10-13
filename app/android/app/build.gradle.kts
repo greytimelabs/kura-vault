@@ -42,3 +42,10 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Orientation, capture time and location of a photo being uploaded
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    // The system prompt for a fingerprint or face, bound to a keystore key
+    implementation("androidx.biometric:biometric:1.1.0")
+}

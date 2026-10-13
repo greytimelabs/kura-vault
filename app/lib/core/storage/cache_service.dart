@@ -93,6 +93,17 @@ class CacheService {
     await file.writeAsBytes(encrypted);
   }
 
+  /// Drop the cached thumbnail of an item that was deleted.
+  Future<void> removeThumb(String mediaId) async {
+    if (_cacheDir == null) return;
+    final file = File('$_cacheDir/$mediaId.enc');
+    try {
+      if (await file.exists()) await file.delete();
+    } catch (_) {
+      // Encrypted, and cleared with the rest of the cache at the latest
+    }
+  }
+
   /// Clear all cached thumbnails for the active vault.
   Future<void> clearCache() async {
     if (_cacheDir == null) return;

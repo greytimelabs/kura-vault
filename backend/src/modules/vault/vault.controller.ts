@@ -23,6 +23,12 @@ export class VaultController {
     return this.vaultService.createVault(user.sub, dto);
   }
 
+  @Delete(':id')
+  async deleteVault(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) vaultId: string) {
+    await this.vaultService.deleteVault(user.sub, vaultId);
+    return null;
+  }
+
   @Get(':id/members')
   async listMembers(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) vaultId: string) {
     return this.vaultService.listMembers(user.sub, vaultId);

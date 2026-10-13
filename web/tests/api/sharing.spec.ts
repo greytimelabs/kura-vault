@@ -5,7 +5,8 @@ import { randomBytes } from '../../src/lib/crypto/aesgcm';
 import { b64decode, b64encode } from '../../src/lib/crypto/base64';
 import { generateIdentity, importSignPrivate, seal, signGrant } from '../../src/lib/crypto/identity';
 import { ApiError, ApiUser, api } from '../e2e/apiUser';
-import { DB, OWNER, SETUP_KEY } from '../e2e/env';
+import { API_STORAGE_PORT, DB, OWNER, S3_BUCKET, SETUP_KEY } from '../e2e/env';
+import { startMemoryStorage, type MemoryStorage } from '../e2e/memoryStorage';
 
 // One story told in order against one database: every test builds on the last.
 test.describe.configure({ mode: 'serial' });
@@ -14,6 +15,7 @@ const PASSWORD = 'Member-Passw0rd!-e2e';
 const VAULT_PASSPHRASE = 'family vault passphrase';
 
 let db: pg.Client;
+let storage: MemoryStorage;
 let owner: ApiUser;
 let mira: ApiUser; // limited access
 let dev: ApiUser; // full access
@@ -34,10 +36,12 @@ const status = async (work: Promise<unknown>): Promise<number> => {
 test.beforeAll(async () => {
   db = new pg.Client(DB);
   await db.connect();
+  storage = startMemoryStorage(API_STORAGE_PORT);
 });
 
 test.afterAll(async () => {
   await db.end();
+  storage.server.close();
 });
 
 test('a new server can only be set up with the setup key, and only once', async () => {
@@ -343,4 +347,180 @@ test('no key is stored unwrapped anywhere in the database', async () => {
 
   const { rows: users } = await db.query('SELECT encrypted_private_keys FROM users');
   for (const row of users) expect(Buffer.from(row.encrypted_private_keys, 'base64').toString('latin1')).not.toContain('encSk');
+});
+
+// ── Deleting ──
+
+/** Put a file in storage for every tier of every item, as the clients' uploads would have. */
+async function fillStorage(): Promise<void> {
+  const { rows } = await db.query('SELECT s3_key_thumb, s3_key_preview, s3_key_original FROM media');
+  for (const row of rows) {
+    for (const key of Object.values(row) as string[]) storage.blobs.set(`/${S3_BUCKET}/${key}`, Buffer.from('ciphertext'));
+  }
+}
+
+const filesOf = (prefix: string) => [...storage.blobs.keys()].filter((key) => key.startsWith(`/${S3_BUCKET}/${prefix}`));
+
+/** The files are erased just after the request returns. */
+async function untilErased(): Promise<void> {
+  await expect
+    .poll(async () => (await db.query('SELECT 1 FROM pending_blob_deletions')).rowCount, { timeout: 10_000 })
+    .toBe(0);
+}
+
+test('only someone who can write to the vault deletes photos, and the files go with the rows', async () => {
+  await fillStorage();
+  const [recipient] = (await owner.directory()).filter((u) => u.username === 'mira.k');
+  await owner.shareVault(familyVault, recipient!, 'view');
+  const before = await owner.listMedia({ vaultId: familyVault });
+  const [first, second] = before;
+
+  // View only, no access at all, and an id that does not exist
+  expect(await status(mira.call('POST', '/media/delete', { ids: [first!.id] }))).toBe(403);
+  expect(await status(dev.call('POST', '/media/delete', { ids: [first!.id] }))).toBe(404);
+  expect(await status(owner.call('POST', '/media/delete', { ids: [first!.id, crypto.randomUUID()] }))).toBe(404);
+  expect(await status(owner.call('POST', '/media/delete', { ids: [] }))).toBe(400);
+  expect((await owner.listMedia({ vaultId: familyVault })).length).toBe(before.length);
+  expect(filesOf(`${familyVault}/${first!.id}/`)).toHaveLength(3);
+
+  // Liked by someone, so a Liked album's count has to follow too
+  await owner.call('PUT', `/albums/liked/media/${first!.id}`, { vaultId: familyVault });
+
+  await owner.call('PATCH', `/vaults/${familyVault}/members/${mira.id}`, { permission: 'write' });
+  await mira.call('POST', '/media/delete', { ids: [first!.id, second!.id] });
+
+  const after = (await owner.listMedia({ vaultId: familyVault })).map((r) => r.id);
+  expect(after).not.toContain(first!.id);
+  expect(after).toHaveLength(before.length - 2);
+  expect(await status(owner.call('GET', `/media/${first!.id}/urls`))).toBe(404);
+  expect((await db.query('SELECT 1 FROM media WHERE id = ANY($1::uuid[])', [[first!.id, second!.id]])).rowCount).toBe(0);
+  expect((await db.query('SELECT 1 FROM album_media WHERE media_id = ANY($1::uuid[])', [[first!.id, second!.id]])).rowCount).toBe(0);
+
+  await untilErased();
+  expect(filesOf(`${familyVault}/${first!.id}/`)).toEqual([]);
+  expect(filesOf(`${familyVault}/${second!.id}/`)).toEqual([]);
+  // Everything else is still there
+  expect(filesOf(`${familyVault}/`)).toHaveLength(after.length * 3);
+
+  // Every album's count matches what is in it
+  const { rows } = await db.query(
+    `SELECT a.media_count, (SELECT COUNT(*)::int FROM album_media am WHERE am.album_id = a.id) AS actual FROM albums a`,
+  );
+  for (const row of rows) expect(row.media_count).toBe(row.actual);
+});
+
+test('someone who has only an album cannot delete what is in it', async () => {
+  const [recipient] = (await owner.directory()).filter((u) => u.username === 'dev');
+  await owner.shareAlbum(tripAlbum, recipient!, 'write');
+  await dev.openSharedAlbums();
+  const mine = await dev.upload(familyVault, 'trip-2-from-dev.jpg', tripAlbum);
+  await fillStorage();
+
+  expect(await status(dev.call('POST', '/media/delete', { ids: [mine.id] }))).toBe(403);
+  expect(await status(dev.call('DELETE', `/albums/${tripAlbum}`))).toBe(403);
+  expect((await dev.listMedia({ albumId: tripAlbum })).map((r) => r.id)).toContain(mine.id);
+});
+
+test('deleting an album keeps its photos in the vault and ends its sharing', async () => {
+  const inAlbum = (await owner.listMedia({ albumId: tripAlbum })).map((r) => r.id);
+  expect(inAlbum.length).toBeGreaterThan(0);
+
+  // One item can only be decrypted through this album: it gets its vault key first
+  expect(await status(owner.call('DELETE', `/albums/${tripAlbum}`))).toBe(409);
+  await owner.openAlbums(familyVault);
+  for (const row of await owner.listMedia({ albumId: tripAlbum })) {
+    if (row.key?.scope !== 'album') continue;
+    const wrap = await owner.keyring.rewrapMediaKey({ mediaId: row.id, key: owner.keyRef(row)!, target: { vaultId: familyVault } });
+    await owner.call('PUT', `/media/${row.id}/vault-key`, { keyWrapped: wrap.wrapped, keyNonce: wrap.nonce });
+  }
+  await owner.call('DELETE', `/albums/${tripAlbum}`);
+
+  const rows = await owner.listMedia({ vaultId: familyVault });
+  for (const id of inAlbum) expect(rows.map((r) => r.id)).toContain(id);
+  // Still readable, now through the vault key
+  expect((await owner.filenames(rows)).every((name) => name !== null)).toBe(true);
+  for (const id of inAlbum) expect(filesOf(`${familyVault}/${id}/`)).toHaveLength(3);
+
+  expect(await status(dev.listMedia({ albumId: tripAlbum }))).toBe(404);
+  expect(await dev.sharedAlbums()).toEqual([]);
+  expect((await db.query('SELECT 1 FROM album_members WHERE album_id = $1', [tripAlbum])).rowCount).toBe(0);
+  expect(await status(owner.call('DELETE', `/albums/${tripAlbum}`))).toBe(404);
+
+  // The Liked album is not an album anyone deletes
+  const albums = await owner.call<{ id: string; kind: string }[]>('GET', `/albums?vaultId=${familyVault}`);
+  const liked = albums.find((a) => a.kind === 'liked')!;
+  expect(await status(owner.call('DELETE', `/albums/${liked.id}`))).toBe(400);
+});
+
+test('files that storage would not erase stay queued, and the rows are gone regardless', async () => {
+  const [row] = await owner.listMedia({ vaultId: familyVault });
+  storage.failDeletes = true;
+  await owner.call('POST', '/media/delete', { ids: [row!.id] });
+
+  expect((await owner.listMedia({ vaultId: familyVault })).map((r) => r.id)).not.toContain(row!.id);
+  await expect
+    .poll(async () => (await db.query('SELECT attempts FROM pending_blob_deletions')).rows.map((r) => r.attempts))
+    .toEqual([1, 1, 1]);
+  expect(filesOf(`${familyVault}/${row!.id}/`)).toHaveLength(3);
+
+  // The next delete that reaches storage takes the queued ones with it
+  storage.failDeletes = false;
+  const [next] = await owner.listMedia({ vaultId: familyVault });
+  await owner.call('POST', '/media/delete', { ids: [next!.id] });
+  await untilErased();
+  expect(filesOf(`${familyVault}/${row!.id}/`)).toEqual([]);
+});
+
+test('only its creator deletes a vault, and everything in it goes for everyone', async () => {
+  expect((await owner.listMedia({ vaultId: familyVault })).length).toBeGreaterThan(0);
+  expect(filesOf(`${familyVault}/`).length).toBeGreaterThan(0);
+
+  // A member with write access, and someone with no access
+  expect(await status(mira.call('DELETE', `/vaults/${familyVault}`))).toBe(403);
+  expect(await status(dev.call('DELETE', `/vaults/${familyVault}`))).toBe(404);
+  expect(await status(owner.call('DELETE', `/vaults/${devVault}`))).toBe(404);
+
+  await owner.call('DELETE', `/vaults/${familyVault}`);
+
+  expect((await owner.vaults()).map((v) => v.id)).not.toContain(familyVault);
+  expect((await mira.vaults()).map((v) => v.id)).not.toContain(familyVault);
+  expect(await status(mira.listMedia({ vaultId: familyVault }))).toBe(403);
+  for (const table of ['media', 'albums', 'vault_members']) {
+    expect((await db.query(`SELECT 1 FROM ${table} WHERE vault_id = $1`, [familyVault])).rowCount).toBe(0);
+  }
+  await untilErased();
+  expect(filesOf(`${familyVault}/`)).toEqual([]);
+  // Other vaults are untouched
+  expect(filesOf(`${devVault}/`)).toHaveLength(3);
+
+  // An upload that was under way when the vault went is refused cleanly
+  expect(await status(owner.upload(familyVault, 'too-late.jpg'))).toBe(403);
+});
+
+test('the owner deletes a user, and the vaults that user created go too', async () => {
+  expect(await status(mira.call('DELETE', `/users/${dev.id}`))).toBe(403);
+  expect(await status(mira.call('GET', `/users/${dev.id}/deletion-summary`))).toBe(403);
+  expect(await status(owner.call('DELETE', `/users/${owner.id}`))).toBe(403);
+  expect(await status(owner.call('DELETE', `/users/${crypto.randomUUID()}`))).toBe(404);
+
+  expect(await owner.call('GET', `/users/${dev.id}/deletion-summary`)).toEqual({ username: 'dev', vaults: 1, items: 1 });
+
+  await owner.call('DELETE', `/users/${dev.id}`);
+
+  // The access token dev still holds is refused, and no new session can start
+  expect(await status(dev.call('GET', '/me'))).toBe(401);
+  expect(await status(api('POST', '/auth/refresh', { body: { refreshToken: dev.refreshToken } }))).toBe(401);
+  expect(await status(dev.signIn())).toBe(401);
+
+  expect((await db.query('SELECT 1 FROM users WHERE id = $1', [dev.id])).rowCount).toBe(0);
+  expect((await db.query('SELECT 1 FROM vaults WHERE id = $1', [devVault])).rowCount).toBe(0);
+  expect((await db.query('SELECT 1 FROM media WHERE vault_id = $1', [devVault])).rowCount).toBe(0);
+  expect((await db.query('SELECT 1 FROM refresh_tokens WHERE user_id = $1', [dev.id])).rowCount).toBe(0);
+  await untilErased();
+  expect(filesOf(`${devVault}/`)).toEqual([]);
+
+  const list = await owner.call<{ users: { username: string }[] }>('GET', '/users');
+  expect(list.users.map((u) => u.username)).not.toContain('dev');
+  // The name is free again
+  expect(await status(owner.invite('dev', 'limited'))).toBe(200);
 });

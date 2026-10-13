@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { ensureAlbumKey, loadAlbums, markAlbumKeyLoaded, type AlbumView } from '@/lib/albums';
-import { albumApi, mediaApi } from '@/lib/api/endpoints';
+import { albumApi, mediaApi, PAGE_SIZE } from '@/lib/api/endpoints';
 import type { Album, MediaItem, MediaPage } from '@/lib/api/types';
 import { cryptoCall } from '@/lib/crypto/cryptoClient';
 import { keyRefOf } from '@/lib/media/mediaKey';
@@ -156,5 +156,35 @@ export function useAlbumActions(vaultId: string) {
     [queryClient, vaultId, refreshAlbums, addOne, removeOne],
   );
 
-  return { createAlbum, renameAlbum, changeMembership };
+  /**
+   * Delete an album; its items stay in the vault. Items uploaded by someone who
+   * had only this album are given their vault-wrapped key first, or nobody
+   * could decrypt them afterwards.
+   */
+  const deleteAlbum = useCallback(
+    async (albumId: string) => {
+      try {
+        await albumApi.remove(albumId);
+      } catch (err) {
+        if ((err as { status?: number }).status !== 409) throw err;
+        await ensureAlbumKey(albumId, vaultId);
+        for (let page = 1; ; page++) {
+          const list = await mediaApi.list(vaultId, page, albumId, PAGE_SIZE);
+          for (const item of list.data) {
+            if (item.key?.scope !== 'album') continue;
+            const key = await cryptoCall('rewrapMediaKey', { mediaId: item.id, key: await keyRefOf(item), target: { vaultId } });
+            await mediaApi.setVaultKey(item.id, key);
+          }
+          if (page >= list.totalPages) break;
+        }
+        await albumApi.remove(albumId);
+      }
+      queryClient.removeQueries({ queryKey: ['media', vaultId, albumId] });
+      queryClient.removeQueries({ queryKey: ['albumCover', vaultId, albumId] });
+      await Promise.all([refreshAlbums(), queryClient.invalidateQueries({ queryKey: ['media', vaultId] })]);
+    },
+    [queryClient, vaultId, refreshAlbums],
+  );
+
+  return { createAlbum, renameAlbum, changeMembership, deleteAlbum };
 }

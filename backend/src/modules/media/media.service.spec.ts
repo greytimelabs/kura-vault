@@ -10,9 +10,13 @@ const ALBUM_VIEW = { canView: true, canWrite: false, isCreator: false, viaVault:
 
 const album = { id: 'album-1', vaultId: 'vault-1', kind: AlbumKind.REGULAR, ownerUserId: null };
 
-function makeService(options: { media?: unknown; album?: unknown } = {}) {
-  const manager = { insert: jest.fn(), increment: jest.fn() };
-  const mediaRepo = { findOne: jest.fn(async () => options.media ?? null), update: jest.fn() };
+function makeService(options: { media?: unknown; album?: unknown; found?: unknown[] } = {}) {
+  const manager = { insert: jest.fn(), increment: jest.fn(), query: jest.fn(), delete: jest.fn() };
+  const mediaRepo = {
+    findOne: jest.fn(async () => options.media ?? null),
+    find: jest.fn(async () => options.found ?? []),
+    update: jest.fn(),
+  };
   const albumRepo = { findOne: jest.fn(async () => options.album ?? null) };
   const dataSource = { transaction: jest.fn(async (work: (m: typeof manager) => Promise<void>) => work(manager)) };
   const storageService = {
@@ -25,6 +29,7 @@ function makeService(options: { media?: unknown; album?: unknown } = {}) {
     forAlbum: jest.fn(async () => NONE),
     forMedia: jest.fn(async () => NONE),
   };
+  const blobPurge = { queueMedia: jest.fn(), purge: jest.fn(async () => undefined) };
   const service = new MediaService(
     mediaRepo as any,
     albumRepo as any,
@@ -32,8 +37,9 @@ function makeService(options: { media?: unknown; album?: unknown } = {}) {
     dataSource as any,
     storageService as any,
     accessService as any,
+    blobPurge as any,
   );
-  return { service, manager, mediaRepo, storageService, accessService };
+  return { service, manager, mediaRepo, storageService, accessService, blobPurge };
 }
 
 const upload = {
@@ -161,5 +167,69 @@ describe('MediaService.setVaultKey', () => {
     // Only fills an empty slot
     expect(mediaRepo.update.mock.calls[0][0]).toMatchObject({ id: 'media-1' });
     expect(Object.keys(mediaRepo.update.mock.calls[0][0])).toContain('keyWrappedVault');
+  });
+});
+
+describe('MediaService.deleteMedia', () => {
+  const found = [
+    { id: 'm-1', vaultId: 'vault-1' },
+    { id: 'm-2', vaultId: 'vault-1' },
+  ];
+
+  it('queues the files and deletes the rows in one transaction, then erases', async () => {
+    const { service, manager, accessService, blobPurge } = makeService({ found });
+    accessService.forVault.mockResolvedValue(VAULT_WRITE);
+
+    await expect(service.deleteMedia('user-1', ['m-1', 'm-2', 'm-1'])).resolves.toEqual({ deleted: 2 });
+
+    expect(blobPurge.queueMedia).toHaveBeenCalledWith(manager, ['m-1', 'm-2']);
+    // Queued before the rows that name the files are gone
+    expect(blobPurge.queueMedia.mock.invocationCallOrder[0]).toBeLessThan(manager.delete.mock.invocationCallOrder[0]);
+    expect(manager.query).toHaveBeenCalledWith(expect.stringContaining('media_count'), [['m-1', 'm-2']]);
+    expect(manager.query).toHaveBeenCalledWith(expect.stringContaining('cover_media_id'), [['m-1', 'm-2']]);
+    expect(blobPurge.purge).toHaveBeenCalled();
+    // One access check per vault, not per item
+    expect(accessService.forVault).toHaveBeenCalledTimes(1);
+  });
+
+  it('deletes nothing when one of the items does not exist', async () => {
+    const { service, manager, accessService } = makeService({ found: [found[0]] });
+    accessService.forVault.mockResolvedValue(VAULT_WRITE);
+    await expect(service.deleteMedia('user-1', ['m-1', 'm-2'])).rejects.toBeInstanceOf(NotFoundException);
+    expect(manager.delete).not.toHaveBeenCalled();
+  });
+
+  it('refuses a vault member who can only view', async () => {
+    const { service, manager, accessService, blobPurge } = makeService({ found });
+    accessService.forVault.mockResolvedValue(VAULT_VIEW);
+    await expect(service.deleteMedia('user-1', ['m-1', 'm-2'])).rejects.toBeInstanceOf(ForbiddenException);
+    expect(manager.delete).not.toHaveBeenCalled();
+    expect(blobPurge.queueMedia).not.toHaveBeenCalled();
+  });
+
+  it('refuses someone who has only an album, even with write access to it', async () => {
+    const { service, manager, accessService } = makeService({ found });
+    accessService.forMedia.mockResolvedValue({ ...ALBUM_VIEW });
+    await expect(service.deleteMedia('user-1', ['m-1'])).rejects.toBeInstanceOf(NotFoundException);
+    accessService.forMedia.mockResolvedValue({ ...ALBUM_WRITE, canWrite: false });
+    await expect(service.deleteMedia('user-1', ['m-1', 'm-2'])).rejects.toBeInstanceOf(ForbiddenException);
+    expect(manager.delete).not.toHaveBeenCalled();
+  });
+
+  it('reads as not found for an item in a vault the caller cannot see', async () => {
+    const { service, accessService } = makeService({ found });
+    accessService.forVault.mockResolvedValue(NONE);
+    await expect(service.deleteMedia('user-1', ['m-1', 'm-2'])).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('stops when one item is in a vault the caller cannot write to', async () => {
+    const { service, manager, accessService } = makeService({
+      found: [found[0], { id: 'm-2', vaultId: 'vault-2' }],
+    });
+    (accessService.forVault as jest.Mock).mockImplementation(async (_user: string, vaultId: string) =>
+      vaultId === 'vault-1' ? VAULT_WRITE : VAULT_VIEW,
+    );
+    await expect(service.deleteMedia('user-1', ['m-1', 'm-2'])).rejects.toBeInstanceOf(ForbiddenException);
+    expect(manager.delete).not.toHaveBeenCalled();
   });
 });

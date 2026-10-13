@@ -10,13 +10,15 @@ import {
   Maximize,
   Minimize,
   Play,
+  Trash2,
   X,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ZoomableImage, type ZoomHandle } from './ZoomableImage';
-import { useToggleLike } from '../timeline/mediaQueries';
+import { useDeleteMedia, useToggleLike } from '../timeline/mediaQueries';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Button } from '@/components/ui/Button';
 import { IconButton } from '@/components/ui/IconButton';
 import { Spinner } from '@/components/ui/Spinner';
@@ -37,6 +39,8 @@ interface ViewerProps {
   items: MediaItem[];
   itemId: string;
   hasMore: boolean;
+  /** Whether the person looking may erase items: write access to the vault itself. */
+  canDelete?: boolean;
   onLoadMore(): void;
   onShow(itemId: string): void;
   onClose(): void;
@@ -70,7 +74,7 @@ function usePreview(item: MediaItem | undefined) {
   return item && state.id === item.id ? state : { id: item?.id ?? '' };
 }
 
-export function Viewer({ vaultId, items, itemId, hasMore, onLoadMore, onShow, onClose }: ViewerProps) {
+export function Viewer({ vaultId, items, itemId, hasMore, canDelete = false, onLoadMore, onShow, onClose }: ViewerProps) {
   const index = items.findIndex((item) => item.id === itemId);
   const item = index === -1 ? undefined : items[index];
   const previous = index > 0 ? items[index - 1] : undefined;
@@ -78,6 +82,8 @@ export function Viewer({ vaultId, items, itemId, hasMore, onLoadMore, onShow, on
 
   const preview = usePreview(item);
   const toggleLike = useToggleLike(vaultId);
+  const deleteMedia = useDeleteMedia(vaultId);
+  const [deleting, setDeleting] = useState(false);
   const zoomRef = useRef<ZoomHandle>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -145,7 +151,8 @@ export function Viewer({ vaultId, items, itemId, hasMore, onLoadMore, onShow, on
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      // The delete question is open: keys belong to it
+      if (deleting || event.metaKey || event.ctrlKey || event.altKey) return;
       switch (event.key) {
         case 'ArrowLeft':
           if (previous) onShow(previous.id);
@@ -186,7 +193,7 @@ export function Viewer({ vaultId, items, itemId, hasMore, onLoadMore, onShow, on
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [previous, next, item, onShow, toggleLike, download, toggleFullscreen]);
+  }, [previous, next, item, deleting, onShow, toggleLike, download, toggleFullscreen]);
 
   if (!item) return null;
 
@@ -279,6 +286,11 @@ export function Viewer({ vaultId, items, itemId, hasMore, onLoadMore, onShow, on
                 >
                   {downloading ? <Spinner className="size-5" /> : <Download className="size-5" />}
                 </IconButton>
+                {canDelete && (
+                  <IconButton label="Delete" tone="onDark" onClick={() => setDeleting(true)}>
+                    <Trash2 className="size-5" />
+                  </IconButton>
+                )}
                 <IconButton
                   label="Info"
                   shortcut="I"
@@ -328,6 +340,32 @@ export function Viewer({ vaultId, items, itemId, hasMore, onLoadMore, onShow, on
           </div>
 
           {infoOpen && <InfoPanel item={item} onClose={() => setInfoOpen(false)} />}
+
+          <ConfirmDialog
+            open={deleting}
+            onOpenChange={setDeleting}
+            title="Delete this item?"
+            confirmLabel="Delete"
+            onConfirm={async () => {
+              // Step off the item first: once it leaves the list there is nothing here to show
+              const after = next ?? previous;
+              if (after) onShow(after.id);
+              try {
+                await deleteMedia([item.id]);
+              } catch (err) {
+                onShow(item.id);
+                throw err;
+              }
+              if (!after) onClose();
+              toast('Deleted');
+            }}
+          >
+            <p>
+              It is erased from the vault and from every album, for everyone the vault is shared with. This cannot be
+              undone.
+            </p>
+            <p className="text-muted">Copies that were already downloaded are not affected.</p>
+          </ConfirmDialog>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

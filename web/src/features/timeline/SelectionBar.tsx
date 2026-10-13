@@ -1,7 +1,9 @@
-import { FolderMinus, FolderPlus, X } from 'lucide-react';
+import { FolderMinus, FolderPlus, Trash2, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { AddToAlbumDialog } from '../albums/AddToAlbumDialog';
 import { useAlbumActions } from '../albums/albumQueries';
+import { useDeleteMedia } from './mediaQueries';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Button } from '@/components/ui/Button';
 import { IconButton } from '@/components/ui/IconButton';
 import { pluralize } from '@/lib/format';
@@ -20,7 +22,10 @@ export function SelectionBar({ vaultId, album }: SelectionBarProps) {
   const clear = useSelectionStore((s) => s.clear);
   const { changeMembership } = useAlbumActions(vaultId);
   const [adding, setAdding] = useState(false);
+  const deleteMedia = useDeleteMedia(vaultId);
   const [removing, setRemoving] = useState(false);
+  // How many are about to be deleted; the dialog keeps saying so while it closes
+  const [deleting, setDeleting] = useState<number | null>(null);
   const count = selected.size;
 
   // A selection belongs to the screen it was made on
@@ -29,13 +34,14 @@ export function SelectionBar({ vaultId, album }: SelectionBarProps) {
   useEffect(() => {
     if (count === 0) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !adding) clear();
+      if (event.key === 'Escape' && !adding && deleting === null) clear();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [count, adding, clear]);
+  }, [count, adding, deleting, clear]);
 
-  if (count === 0) return null;
+  // The dialog outlives the selection it empties, long enough to close itself
+  if (count === 0 && deleting === null) return null;
 
   const removeFromAlbum = async () => {
     if (!album) return;
@@ -52,7 +58,7 @@ export function SelectionBar({ vaultId, album }: SelectionBarProps) {
 
   return (
     <>
-      <div
+      {count > 0 && <div
         role="toolbar"
         aria-label="Selection"
         className="pop-in fixed bottom-6 left-1/2 z-40 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-line bg-raised py-1.5 pl-2 pr-3 shadow-2xl"
@@ -77,7 +83,28 @@ export function SelectionBar({ vaultId, album }: SelectionBarProps) {
             Remove
           </Button>
         )}
-      </div>
+        <Button size="sm" variant="danger" icon={<Trash2 className="size-4" />} onClick={() => setDeleting(count)}>
+          Delete
+        </Button>
+      </div>}
+
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title={`Delete ${pluralize(deleting ?? 0, 'item')}?`}
+        confirmLabel="Delete"
+        onConfirm={async () => {
+          await deleteMedia([...selected]);
+          toast(`Deleted ${pluralize(deleting ?? 0, 'item')}`);
+          clear();
+        }}
+      >
+        <p>
+          {deleting === 1 ? 'This item is' : 'These items are'} erased from the vault and from every album, for everyone
+          the vault is shared with. This cannot be undone.
+        </p>
+        <p className="text-muted">Copies that were already downloaded are not affected.</p>
+      </ConfirmDialog>
 
       <AddToAlbumDialog
         open={adding}

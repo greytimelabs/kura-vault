@@ -83,6 +83,7 @@ export function MediaView({
           items={list.items}
           itemId={viewer.viewerId}
           hasMore={list.hasMore}
+          canDelete={canOrganise}
           onLoadMore={list.loadMore}
           onShow={viewer.show}
           onClose={viewer.close}

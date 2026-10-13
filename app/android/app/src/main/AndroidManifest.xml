@@ -1,12 +1,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Saving a photo to the gallery. Android 10+ needs no permission for it. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
     <!-- Cleartext is needed for self-hosted servers on a home network without
          TLS. The app itself refuses http:// for anything but localhost and
          private IP ranges (lib/core/server/server_url.dart); the manifest
-         cannot express address ranges. -->
+         cannot express address ranges.
+         Backup is off: see res/xml/data_extraction_rules.xml. -->
     <application
         android:label="Kura Vault"
         android:usesCleartextTraffic="true"
+        android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -43,6 +51,10 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <!-- Taking a photo to upload opens the device's camera app -->
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE"/>
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

@@ -1,17 +1,21 @@
 import { clsx } from 'clsx';
 import { KeyRound, Lock, LogOut, Share2, Trash2, UserRound, Users } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShareDialog } from '../sharing/ShareDialog';
 import { PageHeader } from '../shell/PageHeader';
 import { CreateVaultDialog } from '../unlock/CreateVaultDialog';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { mediaApi } from '@/lib/api/endpoints';
+import { pluralize } from '@/lib/format';
 import { Select } from '@/components/ui/Select';
 import { clearThumbUrls } from '@/lib/media/thumbLoader';
 import { clearThumbStore } from '@/lib/media/thumbStore';
 import { MULTI_SERVER } from '@/lib/config';
 import { hostOf } from '@/lib/serverUrl';
-import { closeVault, discardVaultMatches, lockVault, removeAccount, signOut, switchAccount } from '@/lib/session';
+import { closeVault, deleteOpenVault, discardVaultMatches, lockVault, removeAccount, signOut, signOutAccount, switchAccount } from '@/lib/session';
 import { useAccountStore } from '@/state/accountStore';
 import { useAuthStore, useCanCreateVaults, useIsOwner } from '@/state/authStore';
 import { AUTO_LOCK_OPTIONS, usePreferences, type ThemeChoice } from '@/state/preferences';
@@ -41,6 +45,14 @@ export function SettingsPage() {
   const [sharing, setSharing] = useState(false);
   const [creatingVault, setCreatingVault] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [deletingVault, setDeletingVault] = useState(false);
+  // Asked for only when the delete question is open
+  const itemCount = useQuery({
+    queryKey: ['vaultItemCount', vaultId],
+    queryFn: async () => (await mediaApi.list(vaultId, 1, null, 1)).total,
+    enabled: deletingVault,
+    staleTime: 0,
+  });
 
   const clearCache = async () => {
     await clearThumbStore();
@@ -97,6 +109,18 @@ export function SettingsPage() {
           detail="Remove cached thumbnails from this browser. They are stored encrypted."
           action={<Button onClick={() => void clearCache()}>Clear</Button>}
         />
+        {isCreator && (
+          <Row
+            icon={<Trash2 className="size-5 text-danger" />}
+            title="Delete this vault"
+            detail={`Erase ${vaultLabel} and everything in it, for everyone it is shared with.`}
+            action={
+              <Button variant="danger" onClick={() => setDeletingVault(true)}>
+                Delete vault
+              </Button>
+            }
+          />
+        )}
       </Section>
 
       {(isOwner || canCreateVaults) && (
@@ -158,6 +182,9 @@ export function SettingsPage() {
                   {account.id !== activeAccountId && (
                     <Button onClick={() => void switchAccount(account.id)}>Switch</Button>
                   )}
+                  {account.id !== activeAccountId && account.signedIn && (
+                    <Button onClick={() => void signOutAccount(account.id)}>Sign out</Button>
+                  )}
                   <Button
                     variant="danger"
                     onClick={() => {
@@ -197,6 +224,27 @@ export function SettingsPage() {
 
       {isCreator && (
         <ShareDialog open={sharing} onOpenChange={setSharing} target={{ kind: 'vault', id: vaultId, name: vaultLabel }} />
+      )}
+      {isCreator && (
+        <ConfirmDialog
+          open={deletingVault}
+          onOpenChange={setDeletingVault}
+          title={`Delete ${vaultLabel}?`}
+          confirmLabel="Delete vault"
+          input={{ label: 'Vault passphrase', secret: true }}
+          onConfirm={async (passphrase) => {
+            if (!(await deleteOpenVault(passphrase))) throw new Error('Wrong passphrase');
+            toast(`Deleted ${vaultLabel}`);
+          }}
+        >
+          <p>
+            {itemCount.data === undefined
+              ? 'Everything in this vault is'
+              : `${pluralize(itemCount.data, 'item')} and every album in this vault ${itemCount.data === 1 ? 'is' : 'are'}`}{' '}
+            erased, for you and for everyone the vault is shared with. This cannot be undone.
+          </p>
+          <p className="text-muted">Enter this vault's passphrase to confirm.</p>
+        </ConfirmDialog>
       )}
       <CreateVaultDialog
         open={creatingVault}

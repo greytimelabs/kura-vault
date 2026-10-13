@@ -1,6 +1,6 @@
-import { Heart, Images, Pencil, Share2 } from 'lucide-react';
+import { Heart, Images, Pencil, Share2, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { AlbumNameDialog } from './AlbumNameDialog';
 import { useAlbumActions, useAlbums } from './albumQueries';
 import { ShareDialog } from '../sharing/ShareDialog';
@@ -8,6 +8,7 @@ import { PageHeader } from '../shell/PageHeader';
 import { MediaView } from '../timeline/MediaView';
 import { useDropUnliked } from '../timeline/mediaQueries';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { StateMessage } from '@/components/ui/StateMessage';
 import type { MediaItem } from '@/lib/api/types';
 import { pluralize } from '@/lib/format';
@@ -25,7 +26,9 @@ export function AlbumPage() {
   // With only this album shared there is no album list to go back to
   const albumOnly = useAlbumOnlyId() !== null;
   const albums = useAlbums(vaultId);
-  const { renameAlbum } = useAlbumActions(vaultId);
+  const { renameAlbum, deleteAlbum } = useAlbumActions(vaultId);
+  const navigate = useNavigate();
+  const [deleting, setDeleting] = useState(false);
   const dropUnliked = useDropUnliked(vaultId, albumId);
   const [renaming, setRenaming] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -52,6 +55,11 @@ export function AlbumPage() {
               {canOrganise && (
                 <Button icon={<Pencil className="size-4" />} onClick={() => setRenaming(true)}>
                   Rename
+                </Button>
+              )}
+              {canOrganise && (
+                <Button variant="danger" icon={<Trash2 className="size-4" />} onClick={() => setDeleting(true)}>
+                  Delete
                 </Button>
               )}
             </div>
@@ -98,6 +106,26 @@ export function AlbumPage() {
           onOpenChange={setSharing}
           target={{ kind: 'album', id: album.id, name: album.name, vaultId }}
         />
+      )}
+      {album && canOrganise && !likedAlbum && (
+        <ConfirmDialog
+          open={deleting}
+          onOpenChange={setDeleting}
+          title={`Delete ${album.name}?`}
+          confirmLabel="Delete album"
+          onConfirm={async () => {
+            await deleteAlbum(album.id);
+            toast(`Deleted ${album.name}`);
+            navigate('/albums', { replace: true });
+          }}
+        >
+          <p>
+            The album is deleted.{' '}
+            {album.mediaCount === 1 ? 'Its 1 item stays' : `Its ${album.mediaCount.toLocaleString()} items stay`} in the
+            vault and in the timeline.
+          </p>
+          <p className="text-muted">Anyone this album alone was shared with can no longer see what was in it.</p>
+        </ConfirmDialog>
       )}
       {album && (
         <AlbumNameDialog

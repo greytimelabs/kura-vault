@@ -240,6 +240,39 @@ export function refreshSession(): Promise<boolean> {
   return refreshInFlight.promise;
 }
 
+/**
+ * Multi-server: end the session of an account that is not the active one, on its
+ * own server. Logging out needs an access token, so the stored refresh token is
+ * exchanged first, under the same lock as any other refresh of that account.
+ * Throws when the server cannot be reached.
+ */
+export function revokeAccountSession(account: { id: string; serverUrl: string }): Promise<void> {
+  const run = async (): Promise<void> => {
+    const refreshToken = accounts.refreshToken(account.id);
+    if (!refreshToken) return;
+
+    const { serverUrl } = account;
+    const refreshed = await send('/auth/refresh', { method: 'POST', body: { refreshToken }, serverUrl }, false);
+    // The server no longer knows this session: nothing left to end
+    if (!refreshed.ok) return;
+    const { data } = (await refreshed.json()) as { data: RefreshResponse & { refreshToken: string } };
+    accounts.setRefreshToken(account.id, data.refreshToken);
+
+    await send(
+      '/auth/logout',
+      {
+        method: 'POST',
+        body: { refreshToken: data.refreshToken },
+        headers: { Authorization: `Bearer ${data.accessToken}` },
+        serverUrl,
+      },
+      false,
+    );
+  };
+  const lockName = `${REFRESH_LOCK}:${account.id}`;
+  return navigator.locks ? (navigator.locks.request(lockName, run) as Promise<void>) : run();
+}
+
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const auth = opts.auth ?? true;
   if (!auth) {

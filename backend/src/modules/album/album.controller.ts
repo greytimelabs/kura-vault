@@ -66,6 +66,12 @@ export class AlbumController {
     return this.albumService.updateAlbum(user.sub, albumId, dto);
   }
 
+  @Delete(':id')
+  async deleteAlbum(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) albumId: string) {
+    await this.albumService.deleteAlbum(user.sub, albumId);
+    return null;
+  }
+
   @Post(':id/media')
   async addMedia(
     @CurrentUser() user: JwtPayload,

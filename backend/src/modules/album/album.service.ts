@@ -162,6 +162,28 @@ export class AlbumService {
   }
 
   /**
+   * Delete an album. Its items stay in the vault; whoever had only this album
+   * loses them. Refused while an item in it can be decrypted through this album
+   * alone: a vault member gives those items their vault key first.
+   */
+  async deleteAlbum(userId: string, albumId: string): Promise<void> {
+    const album = await this.findEditableAlbum(userId, albumId);
+
+    const stranded = await this.mediaRepo
+      .createQueryBuilder('media')
+      .innerJoin('album_media', 'am', 'am.media_id = media.id AND am.album_id = :albumId', { albumId: album.id })
+      .where('media.key_wrapped_vault IS NULL')
+      .getCount();
+    if (stranded > 0) {
+      throw new ConflictException('Add the vault key for every item in this album before deleting it');
+    }
+
+    // album_media and album_members rows go with the album
+    await this.albumRepo.delete({ id: album.id });
+    this.logger.log(`Album deleted: ${album.id} by user: ${userId}`);
+  }
+
+  /**
    * Add media to the caller's Liked album. Anyone who can see the item can like it; liking twice is a no-op.
    */
   async likeMedia(userId: string, vaultId: string, mediaId: string): Promise<void> {

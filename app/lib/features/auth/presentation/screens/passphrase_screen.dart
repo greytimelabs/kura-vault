@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../blocs/crypto/vault_crypto_cubit.dart';
 import '../../../../blocs/vault/vault_cubit.dart';
 import '../../../../blocs/auth/auth_cubit.dart';
+import '../../../../core/network/api_client.dart';
+import '../../../users/data/users_api.dart';
 import '../widgets/account_switcher_sheet.dart';
+import '../widgets/create_vault_dialog.dart';
 import '../widgets/vault_picker_sheet.dart';
 
 /// Shown once the account is unlocked: what others shared with it, listed, and
@@ -29,6 +33,35 @@ class _PassphraseScreenState extends State<PassphraseScreen> {
   void initState() {
     super.initState();
     _loadShared();
+    _certifyNewUsers();
+  }
+
+  /// The owner's client is what makes a new user shareable: it checks the keys
+  /// they joined with against their invite and signs them. Done as soon as the
+  /// owner's keys are loaded, so nobody waits for the owner to open a screen.
+  Future<void> _certifyNewUsers() async {
+    if (!(context.read<AuthCubit>().state.active?.isOwner ?? false)) return;
+    final api = UsersApi(context.read<ApiClient>());
+    final crypto = context.read<VaultCryptoCubit>();
+    try {
+      final rejected = await certifyPendingUsers(api, crypto);
+      if (rejected.isNotEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(rejectedKeysMessage(rejected)),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ));
+      }
+    } catch (_) {
+      // Tried again when the users screen or a share sheet opens
+    }
+  }
+
+  /// Make a vault and go straight into it.
+  Future<void> _createVault() async {
+    final cryptoCubit = context.read<VaultCryptoCubit>();
+    final created = await CreateVaultDialog.show(context);
+    // The router moves on to the gallery once a vault is open
+    if (created != null) cryptoCubit.selectVault(created, [created]);
   }
 
   @override
@@ -211,11 +244,29 @@ class _PassphraseScreenState extends State<PassphraseScreen> {
                 textAlign: TextAlign.center,
               ),
             const SizedBox(height: 16),
-            TextButton.icon(
-              // Wipes every key: the master passphrase is needed again
-              onPressed: () => context.read<VaultCryptoCubit>().lock(),
-              icon: const Icon(Icons.lock_outline),
-              label: const Text('Lock'),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 8,
+              children: [
+                if (canHaveVaults)
+                  TextButton.icon(
+                    onPressed: _loading ? null : _createVault,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Create a vault'),
+                  ),
+                if (account?.isOwner ?? false)
+                  TextButton.icon(
+                    onPressed: () => context.push('/users'),
+                    icon: const Icon(Icons.group_outlined),
+                    label: const Text('Manage users'),
+                  ),
+                TextButton.icon(
+                  // Wipes every key: the master passphrase is needed again
+                  onPressed: () => context.read<VaultCryptoCubit>().lock(),
+                  icon: const Icon(Icons.lock_outline),
+                  label: const Text('Lock'),
+                ),
+              ],
             ),
           ],
         ),

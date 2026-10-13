@@ -5,6 +5,7 @@ import {
   currentUser,
   onSessionLost,
   refreshSession,
+  revokeAccountSession,
   setAccessToken,
   setActiveAccount,
 } from './api/client';
@@ -159,6 +160,27 @@ export async function removeAccount(id: string): Promise<void> {
   const activeBefore = accounts.activeId();
   accounts.remove(id);
   if (accounts.activeId() !== activeBefore) await activate(accounts.active());
+}
+
+/**
+ * Multi-server: sign out of an account but keep it in the list, so signing back
+ * in only needs the password. For an account that is not the active one, its
+ * session is ended on its own server; if that server cannot be reached the token
+ * is still deleted here, and with no copy left it can never be used.
+ */
+export async function signOutAccount(id: string): Promise<void> {
+  if (id === accounts.activeId()) {
+    await signOut();
+    return;
+  }
+  const account = accounts.byId(id);
+  if (!account?.signedIn) return;
+  try {
+    await revokeAccountSession(account);
+  } catch {
+    // Best effort; the local token is deleted regardless
+  }
+  accounts.markSignedOut(id);
 }
 
 /** Restore the session when the page loads: from the refresh cookie, or from the active account. */
@@ -511,6 +533,27 @@ export async function createVault(passphrase: string, label: string): Promise<Va
     throw err;
   }
   return { vaultId: vault.id, label: label.trim() || 'New vault' };
+}
+
+/**
+ * Delete the open vault with everything in it, for everyone it is shared with.
+ * The vault passphrase is checked here first, so an unlocked screen left alone
+ * is not enough to destroy a vault. Resolves false when the passphrase is wrong.
+ */
+export async function deleteOpenVault(passphrase: string): Promise<boolean> {
+  const { vaultId, isCreator } = useVaultStore.getState();
+  if (!vaultId || !isCreator) throw new Error('Only the creator of a vault can delete it');
+
+  const own = (await vaultApi.list()).filter(
+    (v): v is typeof v & { kdfSalt: string } => v.id === vaultId && v.role === 'creator' && v.kdfSalt !== null,
+  );
+  const matches = await cryptoCall('findMatches', { passphrase, vaults: own });
+  discardVaultMatches();
+  if (!matches.some((match) => match.vaultId === vaultId)) return false;
+
+  await vaultApi.remove(vaultId);
+  closeVault();
+  return true;
 }
 
 /** Whether a server still needs its owner account created. False when it cannot be asked. */

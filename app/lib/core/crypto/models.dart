@@ -222,6 +222,45 @@ class MediaKeyRef {
   }
 }
 
+/// A key wrapped under another AES key, both parts base64.
+typedef WrappedKey = ({String wrapped, String nonce});
+
+/// Text encrypted under a vault, album or item key, both parts base64.
+typedef EncryptedText = ({String encrypted, String nonce});
+
+/// One encrypted tier of an upload, with its IV in base64.
+typedef EncryptedTier = ({Uint8List data, String iv});
+
+/// What the server stores for a new vault.
+typedef NewVault = ({
+  String id,
+  String wrappedKey,
+  String kdfSalt,
+  String? labelEncrypted,
+  String? labelNonce,
+});
+
+/// What the server stores for a new album.
+typedef NewAlbum = ({
+  String id,
+  String keyWrapped,
+  String keyNonce,
+  String nameEncrypted,
+  String nameNonce,
+});
+
+/// An upload, encrypted. [vaultKey] is null when uploading with only an album
+/// key; [albumKey] is null when the upload does not go into an album.
+typedef EncryptedMedia = ({
+  WrappedKey? vaultKey,
+  WrappedKey? albumKey,
+  EncryptedTier thumb,
+  EncryptedTier preview,
+  EncryptedTier original,
+  String encryptedMeta,
+  String metaNonce,
+});
+
 /// The invite link. Everything that matters is in the fragment, which is never
 /// sent to any server: the secret that proves the invitee's keys to the owner,
 /// and the owner's signing key the invitee will trust from then on.

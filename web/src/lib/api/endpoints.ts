@@ -78,6 +78,10 @@ export const userApi = {
     request<unknown>(`/users/${userId}`, { method: 'PATCH', body: input }),
   certify: (userId: string, keyCert: string) =>
     request<null>(`/users/${userId}/cert`, { method: 'PUT', body: { keyCert } }),
+  /** What deleting this user would erase: the vaults they created and everything in them. */
+  deletionSummary: (userId: string) =>
+    request<{ username: string; vaults: number; items: number }>(`/users/${userId}/deletion-summary`),
+  remove: (userId: string) => request<null>(`/users/${userId}`, { method: 'DELETE' }),
 };
 
 /** Sharing works the same way for a vault and for an album. */
@@ -104,6 +108,8 @@ export const vaultApi = {
   /** The caller's own vaults and those shared with them. Nobody else's. */
   list: () => request<VaultRow[]>('/vaults'),
   create: (input: CreateVaultInput) => request<{ id: string }>('/vaults', { method: 'POST', body: input }),
+  /** Creator only. Erases the vault and everything in it, for everyone. */
+  remove: (vaultId: string) => request<null>(`/vaults/${vaultId}`, { method: 'DELETE' }),
   members: membersApi((vaultId) => `/vaults/${vaultId}/members`),
 };
 
@@ -128,6 +134,9 @@ export interface UploadCompleteInput {
   metaNonce: string;
 }
 
+/** The most items one delete request may name. */
+export const DELETE_BATCH = 100;
+
 export const mediaApi = {
   list: (vaultId: string, page: number, albumId?: string | null, limit = PAGE_SIZE, signal?: AbortSignal) =>
     request<MediaPage>('/media', { query: { vaultId, page, limit, albumId }, signal }),
@@ -136,6 +145,8 @@ export const mediaApi = {
     request<UploadInitResponse>('/media/upload/init', { method: 'POST', body: input }),
   uploadComplete: (input: UploadCompleteInput) =>
     request<{ id: string }>('/media/upload/complete', { method: 'POST', body: input }),
+  /** Erase items for good. All or nothing; at most `DELETE_BATCH` at a time. */
+  remove: (ids: string[]) => request<{ deleted: number }>('/media/delete', { method: 'POST', body: { ids } }),
   /** Give an item uploaded through an album its vault-wrapped key. */
   setVaultKey: (mediaId: string, key: { wrapped: string; nonce: string }) =>
     request<null>(`/media/${mediaId}/vault-key`, { method: 'PUT', body: { keyWrapped: key.wrapped, keyNonce: key.nonce } }),
@@ -154,6 +165,8 @@ export const albumApi = {
       method: 'POST',
       body: { mediaId, keyWrapped: key.wrapped, keyNonce: key.nonce },
     }),
+  /** Delete the album. Its items stay in the vault. */
+  remove: (albumId: string) => request<null>(`/albums/${albumId}`, { method: 'DELETE' }),
   removeMedia: (albumId: string, mediaId: string) =>
     request<null>(`/albums/${albumId}/media/${mediaId}`, { method: 'DELETE' }),
   like: (mediaId: string, vaultId: string) =>

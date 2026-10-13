@@ -52,6 +52,12 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Unlock Kura Vault with Face ID instead of typing your master passphrase.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Kura Vault uses the camera when you choose to take a photo and upload it straight into a vault.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Kura Vault adds a photo to your library only when you choose Save to gallery.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Kura Vault connects to a vault server on your local network when you add one by its local address.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

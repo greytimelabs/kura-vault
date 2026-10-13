@@ -8,13 +8,14 @@ import { Media } from './entities/media.entity';
 import { Album } from '../album/entities/album.entity';
 import { AlbumMedia } from '../album/entities/album-media.entity';
 import { StorageService } from '../storage/storage.service';
+import { BlobPurgeService } from '../storage/blob-purge.service';
 import { Access, AccessService } from '../../common/access/access.service';
 import { UploadInitDto } from './dto/upload-init.dto';
 import { UploadCompleteDto } from './dto/upload-complete.dto';
 import { QueryMediaDto } from './dto/query-media.dto';
 import { SetVaultKeyDto } from './dto/vault-key.dto';
 import { AlbumKind, MediaType, PaginatedResponse } from '../../common/types';
-import { PG_UNIQUE_VIOLATION } from '../../common/constants';
+import { PG_FOREIGN_KEY_VIOLATION, PG_UNIQUE_VIOLATION } from '../../common/constants';
 
 /** An item's key as one caller can unwrap it: under the vault key, or under the key of an album it is in. */
 export interface MediaKeyView {
@@ -41,6 +42,7 @@ export class MediaService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly storageService: StorageService,
     private readonly accessService: AccessService,
+    private readonly blobPurge: BlobPurgeService,
   ) {}
 
   /**
@@ -169,6 +171,10 @@ export class MediaService {
     } catch (err) {
       if (err instanceof QueryFailedError && (err as QueryFailedError & { code?: string }).code === PG_UNIQUE_VIOLATION) {
         throw new ConflictException('This upload was already completed');
+      }
+      // The vault or the album was deleted while the files were uploading
+      if (err instanceof QueryFailedError && (err as QueryFailedError & { code?: string }).code === PG_FOREIGN_KEY_VIOLATION) {
+        throw new NotFoundException('Vault not found');
       }
       throw err;
     }
@@ -382,5 +388,53 @@ export class MediaService {
       { id: media.id, keyWrappedVault: IsNull() },
       { keyWrappedVault: dto.keyWrapped, keyNonceVault: dto.keyNonce },
     );
+  }
+
+  /**
+   * Erase items for good: their rows now, their encrypted files right after.
+   * Needs write access to the vault itself; having one shared album is not
+   * enough. All or nothing: one item the caller may not delete stops the lot.
+   */
+  async deleteMedia(userId: string, ids: string[]): Promise<{ deleted: number }> {
+    const unique = [...new Set(ids)];
+    const items = await this.mediaRepo.find({ where: { id: In(unique), isDeleted: false } });
+    if (items.length !== unique.length) {
+      throw new NotFoundException('Media not found');
+    }
+
+    const access = new Map<string, Access>();
+    for (const media of items) {
+      let viaVault = access.get(media.vaultId);
+      if (!viaVault) {
+        viaVault = await this.accessService.forVault(userId, media.vaultId);
+        access.set(media.vaultId, viaVault);
+      }
+      if (viaVault.canWrite) {
+        continue;
+      }
+      // Someone who can see the item is told they may not delete it; anyone else, that it is not there
+      const canView = viaVault.canView || (await this.accessService.forMedia(userId, media)).canView;
+      throw canView
+        ? new ForbiddenException('Write access to the vault required')
+        : new NotFoundException('Media not found');
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      await this.blobPurge.queueMedia(manager, unique);
+      // Every album the items are in, each user's Liked album included
+      await manager.query(
+        `UPDATE albums a SET media_count = GREATEST(a.media_count - c.n, 0)
+         FROM (SELECT album_id, COUNT(*)::int AS n FROM album_media WHERE media_id = ANY($1::uuid[]) GROUP BY album_id) c
+         WHERE a.id = c.album_id`,
+        [unique],
+      );
+      await manager.query(`UPDATE albums SET cover_media_id = NULL WHERE cover_media_id = ANY($1::uuid[])`, [unique]);
+      // album_media rows go with the item
+      await manager.delete(Media, { id: In(unique) });
+    });
+    void this.blobPurge.purge();
+
+    this.logger.log(`Media deleted: ${unique.length} by user: ${userId}`);
+    return { deleted: unique.length };
   }
 }

@@ -14,6 +14,7 @@ function makeService() {
     update: jest.fn(async () => ({ affected: 1 })),
     delete: jest.fn(),
     insert: jest.fn(),
+    find: jest.fn(async () => [] as { id: string }[]),
   };
   const userRepo = {
     findOne: jest.fn(),
@@ -29,10 +30,14 @@ function makeService() {
     create: jest.fn((v) => v),
     insert: jest.fn(),
   };
-  const dataSource = { transaction: jest.fn(async (work: (m: typeof manager) => Promise<void>) => work(manager)) };
+  const dataSource = {
+    transaction: jest.fn(async (work: (m: typeof manager) => Promise<void>) => work(manager)),
+    query: jest.fn(),
+  };
+  const blobPurge = { queueVaults: jest.fn(), purge: jest.fn(async () => undefined) };
   const authService = { hashPassword: jest.fn(async () => 'hash'), revokeAllSessions: jest.fn(), verifyPassword: jest.fn() };
-  const service = new UserService(userRepo as any, inviteRepo as any, dataSource as any, authService as any);
-  return { service, manager, userRepo, inviteRepo, authService };
+  const service = new UserService(userRepo as any, inviteRepo as any, dataSource as any, authService as any, blobPurge as any);
+  return { service, manager, userRepo, inviteRepo, authService, dataSource, blobPurge };
 }
 
 const member = () => ({
@@ -176,5 +181,47 @@ describe('UserService invites', () => {
       }),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(inviteRepo.insert).not.toHaveBeenCalled();
+  });
+});
+
+describe('UserService.deleteUser', () => {
+  it('erases the vaults the user created along with the account', async () => {
+    const { service, manager, userRepo, blobPurge } = makeService();
+    userRepo.findOne.mockResolvedValue(member());
+    manager.find.mockResolvedValue([{ id: 'vault-a' }, { id: 'vault-b' }]);
+
+    await service.deleteUser('owner-1', 'user-2');
+
+    expect(blobPurge.queueVaults).toHaveBeenCalledWith(manager, ['vault-a', 'vault-b']);
+    expect(manager.delete).toHaveBeenCalledWith(UserInvite, { userId: 'user-2' });
+    expect(manager.delete).toHaveBeenCalledWith(User, { id: 'user-2' });
+    // Files are queued while the rows that name them still exist
+    expect(blobPurge.queueVaults.mock.invocationCallOrder[0]).toBeLessThan(manager.delete.mock.invocationCallOrder[0]);
+    expect(blobPurge.purge).toHaveBeenCalled();
+  });
+
+  it('never deletes the owner account', async () => {
+    const { service, manager, userRepo } = makeService();
+    userRepo.findOne.mockResolvedValue({ ...member(), id: 'owner-1', role: UserRole.OWNER });
+    await expect(service.deleteUser('owner-1', 'owner-1')).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.deletionSummary('owner-1', 'owner-1')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(manager.delete).not.toHaveBeenCalled();
+  });
+
+  it('reports an unknown user as not found', async () => {
+    const { service, userRepo } = makeService();
+    userRepo.findOne.mockResolvedValue(null);
+    await expect(service.deleteUser('owner-1', 'user-9')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('counts what would be erased', async () => {
+    const { service, userRepo, dataSource } = makeService();
+    userRepo.findOne.mockResolvedValue(member());
+    dataSource.query.mockResolvedValue([{ vaults: '2', items: '341' }]);
+    await expect(service.deletionSummary('owner-1', 'user-2')).resolves.toEqual({
+      username: 'mira.k',
+      vaults: 2,
+      items: 341,
+    });
   });
 });

@@ -127,6 +127,58 @@ test('a saved account signs back in with only the password', async () => {
   await page.keyboard.press('Escape');
 });
 
+test('an account that is not the active one can be signed out and stays listed', async ({}, testInfo) => {
+  // Make B the active account, signed in again, with A still signed in beside it
+  await openAccounts();
+  await accountItem(HOST_B).click();
+  await expect(page).toHaveURL(/\/login\?server=/);
+  await page.getByLabel('Password', { exact: true }).fill(OWNER.password);
+  await page.getByRole('button', { name: 'Login' }).click();
+  await expect(page).toHaveURL(/\/unlock$/);
+
+  // Settings sits behind an open vault
+  await page.getByLabel('Master passphrase', { exact: true }).fill(OWNER.passphrase);
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await page.getByRole('button', { name: 'Create a vault' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create a vault' });
+  const vaultPassphrase = `multi-server vault ${testInfo.project.name}`;
+  await dialog.getByLabel('Name', { exact: true }).fill(`Multi ${testInfo.project.name}`);
+  await dialog.getByLabel('Passphrase', { exact: true }).fill(vaultPassphrase);
+  await dialog.getByLabel('Confirm passphrase', { exact: true }).fill(vaultPassphrase);
+  await dialog.getByRole('button', { name: 'Create vault' }).click();
+  await expect(page).toHaveURL(/\/timeline$/);
+  await page.getByRole('navigation', { name: 'Main' }).first().getByRole('link', { name: 'Settings' }).click();
+
+  const tokens = () =>
+    page.evaluate(() =>
+      Object.entries({ ...localStorage })
+        .filter(([key]) => key.startsWith('mv_refresh.'))
+        .map(([, value]) => value as string),
+    );
+  const before = await tokens();
+  expect(before).toHaveLength(2);
+
+  // Only the other account offers it; the active one has Logout
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.getByText(`${HOST_A} · Sign in required`)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toHaveCount(0);
+  // The active account and its open vault are untouched
+  await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
+  await expect(page.getByText(`${HOST_B} · Active`)).toBeVisible();
+
+  const after = await tokens();
+  expect(after).toHaveLength(1);
+  // Ended on its server too: no token A ever held starts a session now
+  for (const token of before.filter((t) => !after.includes(t))) {
+    const response = await fetch(`${SERVER_A}/api/v1/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: token }),
+    });
+    expect(response.status).toBe(401);
+  }
+});
+
 test('nothing was blocked or thrown', () => {
   expect(problems).toEqual([]);
 });

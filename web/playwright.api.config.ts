@@ -1,5 +1,5 @@
 import { defineConfig } from '@playwright/test';
-import { API_URL } from './tests/e2e/env';
+import { API_STORAGE_PORT, API_URL } from './tests/e2e/env';
 
 // The server's rules tested without a browser: a real backend and database,
 // driven by the same key-handling code the web client runs. Fast, and the place
@@ -16,6 +16,8 @@ export default defineConfig({
   webServer: [
     {
       command: 'tsx tests/e2e/start-backend.ts',
+      // Deleting erases files, so this suite gives the server a storage it can reach
+      env: { E2E_S3_ENDPOINT: `http://127.0.0.1:${API_STORAGE_PORT}` },
       url: `${API_URL}/health`,
       timeout: 180_000,
       reuseExistingServer: false,

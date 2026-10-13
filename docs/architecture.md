@@ -29,7 +29,7 @@ anything it holds.
 |---|---|
 | `backend/` | Authenticates accounts, enforces who can reach which vault and album, stores wrapped keys and structural metadata, hands out pre-signed storage URLs. Never handles media bytes. |
 | `web/` | Browser client. Keys live only inside a dedicated Web Worker. |
-| `app/` | Flutter mobile client, BLoC state management. A viewer: it does not upload or manage users. |
+| `app/` | Flutter mobile client (Android and iOS), BLoC state management. Does what the web client does, for photos; invite links and video transfer stay on the web. |
 | `migration-cli/` | One-off bulk import of an existing library. |
 | PostgreSQL | Ten tables; see [database](database/README.md). |
 | Object storage | AWS S3 or any S3-compatible service such as Cloudflare R2. |
@@ -159,6 +159,31 @@ typed.
    keys. The user's next request is refused; restricting also ends every
    session. See [security](security.md) for what this does not do.
 
+### Delete
+
+Deleting is permanent; there is no trash.
+
+| What | Who | What goes |
+|---|---|---|
+| Photos and videos | Anyone with write access to the vault itself | The items, in every album, for everyone |
+| An album | Anyone with write access to the vault | The album and its sharing. Its items stay in the vault |
+| A vault | Its creator | Everything in it, for everyone it is shared with |
+| A user | The server owner | The account, its sessions, everything shared with it, and every vault it created |
+
+1. The rows are deleted in one transaction, and the same transaction writes
+   the storage keys of the encrypted files into `pending_blob_deletions`.
+2. `BlobPurgeService` erases those files from storage right after the commit
+   and removes each entry once its file is gone. Whatever could not be erased
+   is tried again at startup and every 10 minutes, so a file outlives its row
+   only until storage answers.
+3. An album whose items include one that only that album's key can open (it
+   was uploaded by someone who had just the album) is refused with 409. The
+   client first gives those items their vault-wrapped key, then retries.
+
+Before deleting a vault, both clients ask for its passphrase and check it on
+the device. The server never sees vault passphrases, so on its side the rule
+is only "creator".
+
 ### Lock
 
 The client destroys every key, the account's private keys included, and
@@ -184,18 +209,21 @@ above.
 | `GET /me` | The account and its encrypted private keys | |
 | `PUT /me/password`, `PUT /me/keys` | Change the password; re-encrypt the keys under a new master passphrase | |
 | `GET /users`, `PATCH /users/:id` | List users; change access level, restrict or lift | owner |
+| `GET /users/:id/deletion-summary`, `DELETE /users/:id` | What deleting a user would erase; delete the user and the vaults they created | owner |
 | `POST /users/invites`, `DELETE /users/invites/:id` | Create or cancel an invite | owner |
 | `PUT /users/:id/cert` | Store the certificate the owner's client signed | owner |
 | `GET /users/directory` | Certified users something can be shared with | owner, full |
 | `GET /vaults` | The caller's own vaults and those shared with them | |
 | `POST /vaults` | Create a vault | owner, full |
+| `DELETE /vaults/:id` | Delete a vault and everything in it | creator |
 | `GET/POST /vaults/:id/members`, `PATCH/DELETE …/:userId` | Share a vault | creator |
 | `POST /media/upload/init`, `/media/upload/complete` | Upload | write |
 | `GET /media` | Page through a vault or an album | view |
 | `GET /media/:id/urls` | Download URLs for one item | view |
+| `POST /media/delete` | Delete up to 100 items for good, all or nothing | vault write |
 | `PUT /media/:id/vault-key` | Add the vault-wrapped key to an item uploaded through an album | vault write |
 | `GET /albums`, `GET /albums/shared` | Albums of a vault; albums shared on their own | view |
-| `POST /albums`, `PUT /albums/:id` | Create, rename | vault write |
+| `POST /albums`, `PUT /albums/:id`, `DELETE /albums/:id` | Create, rename, delete (items stay in the vault) | vault write |
 | `POST /albums/:id/media`, `DELETE …/:mediaId` | Add or remove an item | vault write |
 | `GET/POST /albums/:id/members`, `PATCH/DELETE …/:userId` | Share one album | creator |
 | `PUT/DELETE /albums/liked/media/:mediaId` | Like, unlike | view |
@@ -222,9 +250,12 @@ in browser storage.
 
 ## What is not built yet
 
-- Deleting media, albums, vaults or users (no endpoints).
+- A trash: deleting is immediate and permanent.
+- Deleting your own account; only the owner deletes accounts.
+- Cleaning up files of uploads that were started and never completed.
 - Re-keying a vault or album when someone's access is removed.
-- User management and sharing in the mobile app (its keyring supports both).
+- In the mobile app: creating invite links, uploading videos and downloading
+  a video's original.
 - A screen for changing the password or master passphrase (the endpoints exist).
 - Recovery of a forgotten master passphrase.
 - In-browser video playback.

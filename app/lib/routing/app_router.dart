@@ -6,6 +6,7 @@ import '../blocs/auth/auth_cubit.dart';
 import '../blocs/auth/auth_state.dart';
 import '../blocs/crypto/vault_crypto_cubit.dart';
 import '../blocs/crypto/vault_crypto_state.dart';
+import '../blocs/selection/selection_cubit.dart';
 import '../features/auth/presentation/screens/join_screen.dart';
 import '../features/auth/presentation/screens/login_screen.dart';
 import '../features/auth/presentation/screens/passphrase_screen.dart';
@@ -16,8 +17,12 @@ import '../features/auth/presentation/widgets/account_switcher_sheet.dart';
 import '../features/gallery/presentation/screens/timeline_screen.dart';
 import '../features/gallery/presentation/screens/album_grid_screen.dart';
 import '../features/gallery/presentation/screens/album_media_screen.dart';
+import '../features/gallery/presentation/widgets/space_menu.dart';
 import '../features/viewer/presentation/screens/photo_viewer_screen.dart';
 import '../features/settings/presentation/screens/settings_screen.dart';
+import '../features/upload/presentation/widgets/upload_button.dart';
+import '../features/upload/presentation/widgets/upload_status.dart';
+import '../features/users/presentation/screens/users_screen.dart';
 
 /// Re-runs the router's redirect when who is signed in changes, or what is
 /// unlocked, and not on every state change (a login in progress must not move
@@ -94,6 +99,13 @@ GoRouter createRouter(AuthCubit authCubit, VaultCryptoCubit cryptoCubit) {
       if (!crypto.accountUnlocked) {
         if (isOnboarding || (isOnAuth && query['add'] == '1')) return null;
         return location == '/unlock' ? null : '/unlock';
+      }
+
+      // User management needs the owner's keys but no open vault
+      if (location == '/users') {
+        return (auth.active?.isOwner ?? false)
+            ? null
+            : (crypto.isUnlocked ? '/gallery' : '/passphrase');
       }
 
       // Unlocked, nothing open: choose what to open
@@ -189,6 +201,10 @@ GoRouter createRouter(AuthCubit authCubit, VaultCryptoCubit cryptoCubit) {
         },
       ),
       GoRoute(
+        path: '/users',
+        builder: (context, state) => const UsersScreen(),
+      ),
+      GoRoute(
         path: '/settings',
         builder: (context, state) => const SettingsScreen(),
       ),
@@ -211,16 +227,41 @@ class _GalleryShellState extends State<_GalleryShell> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Kura Vault'),
+        // What is open, as the web client's top bar shows it
+        title: Row(
+          children: [
+            const Icon(Icons.lock_outline, size: 18),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                context.select((VaultCryptoCubit c) => c.state.activeLabel) ?? 'Kura Vault',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
         actions: [
+          // Picking photos to file into an album; the timeline also takes a long-press
+          if (_currentIndex == 0 &&
+              context.select((VaultCryptoCubit c) => c.state.canOrganise) &&
+              !context.select((SelectionCubit c) => c.state.active))
+            IconButton(
+              tooltip: 'Select',
+              icon: const Icon(Icons.check_circle_outline),
+              onPressed: () => context.read<SelectionCubit>().start(),
+            ),
+          if (context.select((VaultCryptoCubit c) => c.state.canWrite))
+            const UploadButton(),
           const _AccountButton(),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () => context.push('/settings'),
-          ),
+          const SpaceMenu(),
         ],
       ),
-      body: widget.child,
+      body: Column(
+        children: [
+          const UploadStatusBar(),
+          Expanded(child: widget.child),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {

@@ -4,11 +4,13 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { InviteUserDialog } from './InviteUserDialog';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Select } from '@/components/ui/Select';
 import { ErrorState, FullPageSpinner } from '@/components/ui/StateMessage';
 import { errorMessage } from '@/lib/api/client';
 import { userApi } from '@/lib/api/endpoints';
 import type { AccessLevel, UserRow } from '@/lib/api/types';
+import { pluralize } from '@/lib/format';
 import { certifyPendingUsers } from '@/lib/session';
 import { toast } from '@/state/toastStore';
 
@@ -23,6 +25,14 @@ export function UsersPage() {
   const list = useQuery({ queryKey: usersKey, queryFn: userApi.list, staleTime: 0 });
   const [inviting, setInviting] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<UserRow | null>(null);
+  // What would go with the account; asked for only when the owner is about to delete
+  const summary = useQuery({
+    queryKey: ['userDeletion', deleting?.userId],
+    queryFn: () => userApi.deletionSummary(deleting!.userId),
+    enabled: deleting !== null,
+    staleTime: 0,
+  });
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: usersKey });
 
@@ -138,6 +148,9 @@ export function UsersPage() {
                           Lift restriction
                         </Button>
                       )}
+                      <Button size="sm" variant="danger" disabled={busyId === user.userId} onClick={() => setDeleting(user)}>
+                        Delete
+                      </Button>
                     </div>
                   )}
                 </li>
@@ -174,6 +187,32 @@ export function UsersPage() {
         )}
       </div>
       <InviteUserDialog open={inviting} onOpenChange={setInviting} />
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title={`Delete ${deleting?.username ?? 'user'}?`}
+        confirmLabel="Delete user"
+        input={{ label: `Type ${deleting?.username ?? ''} to confirm`, expected: deleting?.username }}
+        onConfirm={async () => {
+          const user = deleting!;
+          await userApi.remove(user.userId);
+          toast(`${user.username} is deleted`);
+          void refresh();
+        }}
+      >
+        <p>The account is deleted and signed out everywhere, and everything shared with it is removed.</p>
+        {summary.data && summary.data.vaults > 0 ? (
+          <p className="font-medium text-danger">
+            {pluralize(summary.data.vaults, 'vault')} this user created, with {pluralize(summary.data.items, 'item')},
+            will be erased as well, for everyone they are shared with.
+          </p>
+        ) : summary.data ? (
+          <p className="text-muted">This user has created no vaults.</p>
+        ) : (
+          <p className="text-muted">Any vault this user created is erased with it, for everyone it is shared with.</p>
+        )}
+        <p>This cannot be undone.</p>
+      </ConfirmDialog>
     </main>
   );
 }

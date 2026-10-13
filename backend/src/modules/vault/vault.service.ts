@@ -7,6 +7,7 @@ import { Vault } from './entities/vault.entity';
 import { VaultMember } from './entities/vault-member.entity';
 import { AccessService } from '../../common/access/access.service';
 import { UserService, publicKeysOf } from '../user/user.service';
+import { BlobPurgeService } from '../storage/blob-purge.service';
 import { PublicUserKeys, SharePermission, VaultMemberRole } from '../../common/types';
 import { PG_UNIQUE_VIOLATION } from '../../common/constants';
 import { AddMemberDto } from '../../common/validation/share.dto';
@@ -34,6 +35,7 @@ export class VaultService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly accessService: AccessService,
     private readonly userService: UserService,
+    private readonly blobPurge: BlobPurgeService,
   ) {}
 
   /**
@@ -101,15 +103,35 @@ export class VaultService {
     return { id: dto.id };
   }
 
+  /**
+   * Delete a vault with everything in it, for everyone it is shared with: rows
+   * now, encrypted files right after. Only its creator can. The client asks for
+   * the vault passphrase first; the server never sees it and cannot check it.
+   */
+  async deleteVault(userId: string, vaultId: string): Promise<void> {
+    await this.requireCreator(userId, vaultId, 'Only the creator of a vault can delete it');
+    await this.dataSource.transaction(async (manager) => {
+      await this.blobPurge.queueVaults(manager, [vaultId]);
+      // Members, albums and media rows go with the vault
+      await manager.delete(Vault, { id: vaultId });
+    });
+    void this.blobPurge.purge();
+    this.logger.warn(`Vault deleted: ${vaultId} by user: ${userId}`);
+  }
+
   /** Only the creator may see or change who a vault is shared with. */
-  async requireCreator(userId: string, vaultId: string): Promise<void> {
+  async requireCreator(
+    userId: string,
+    vaultId: string,
+    refusal = 'Only the creator of a vault can share it',
+  ): Promise<void> {
     const access = await this.accessService.forVault(userId, vaultId);
     // A vault the caller cannot see does not exist as far as they are told
     if (!access.canView) {
       throw new NotFoundException('Vault not found');
     }
     if (!access.isCreator) {
-      throw new ForbiddenException('Only the creator of a vault can share it');
+      throw new ForbiddenException(refusal);
     }
   }
 

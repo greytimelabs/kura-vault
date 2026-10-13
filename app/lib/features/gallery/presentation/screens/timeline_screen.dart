@@ -3,7 +3,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../blocs/crypto/vault_crypto_cubit.dart';
 import '../../../../blocs/media/media_cubit.dart';
 import '../../../../blocs/media/media_state.dart';
+import '../../../../blocs/selection/selection_cubit.dart';
 import '../widgets/media_grid.dart';
+import '../widgets/selection_bar.dart';
 import '../widgets/month_header.dart';
 
 class TimelineScreen extends StatefulWidget {
@@ -15,10 +17,12 @@ class TimelineScreen extends StatefulWidget {
 
 class _TimelineScreenState extends State<TimelineScreen> {
   final _scrollController = ScrollController();
+  late final SelectionCubit _selection = context.read<SelectionCubit>();
 
   @override
   void initState() {
     super.initState();
+    _selection.clear();
     _loadInitial();
     _scrollController.addListener(_onScroll);
   }
@@ -42,13 +46,26 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   @override
   void dispose() {
+    // A selection belongs to the screen it was made on
+    _selection.clear();
     _scrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return BlocBuilder<MediaCubit, MediaState>(
+    final crypto = context.watch<VaultCryptoCubit>().state;
+    final vaultId = crypto.activeVaultId;
+    final selectable = crypto.canOrganise;
+    final selecting = context.select((SelectionCubit c) => c.state.active);
+
+    return PopScope(
+      // Back leaves selection mode before it leaves the app
+      canPop: !selecting,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _selection.clear();
+      },
+      child: BlocBuilder<MediaCubit, MediaState>(
       builder: (context, state) {
         if (state.status == MediaStatus.loading) {
           return const Center(child: CircularProgressIndicator());
@@ -85,23 +102,35 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
         final months = grouped.keys.toList();
 
-        return CustomScrollView(
-          controller: _scrollController,
-          slivers: [
-            for (final month in months) ...[
-              SliverToBoxAdapter(child: MonthHeader(yearMonth: month)),
-              MediaGrid(items: grouped[month]!),
-            ],
-            if (state.status == MediaStatus.loadingMore)
-              const SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Center(child: CircularProgressIndicator()),
-                ),
+        return Stack(
+          children: [
+            CustomScrollView(
+              controller: _scrollController,
+              slivers: [
+                for (final month in months) ...[
+                  SliverToBoxAdapter(child: MonthHeader(yearMonth: month)),
+                  MediaGrid(items: grouped[month]!, selectable: selectable),
+                ],
+                if (state.status == MediaStatus.loadingMore)
+                  const SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
+                  ),
+                // Room for the selection bar
+                const SliverToBoxAdapter(child: SizedBox(height: 88)),
+              ],
+            ),
+            if (selectable && vaultId != null)
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: SelectionBar(vaultId: vaultId),
               ),
           ],
         );
       },
+      ),
     );
   }
 }

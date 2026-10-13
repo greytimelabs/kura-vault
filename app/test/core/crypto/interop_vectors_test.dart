@@ -7,6 +7,7 @@ import 'package:kura_vault/core/crypto/aad.dart';
 import 'package:kura_vault/core/crypto/crypto_service.dart';
 import 'package:kura_vault/core/crypto/identity_crypto.dart';
 import 'package:kura_vault/core/crypto/key_derivation.dart';
+import 'package:kura_vault/core/crypto/media_worker.dart';
 
 /// Recomputes every entry of crypto-vectors.json (written by the web client's
 /// implementation) with this app's crypto. Passing proves the web client, the
@@ -285,6 +286,269 @@ void main() {
       cubit.selectVault(matches.single, matches);
       expect(cubit.state.isCreator, true);
       expect(Aad.vaultLabel('x'), isNotEmpty);
+      cubit.lock();
+    });
+
+    test('the background worker reads and writes the same bytes', () async {
+      final mediaId = media['id'] as String;
+      final key = _hex(media['key'] as String);
+      final aad = Aad.mediaBlob(mediaId, 'thumb');
+      final plaintext = b64d(media['thumbPlaintext'] as String);
+
+      // The web client's ciphertext opens in the worker
+      expect(
+        await MediaWorker.decrypt(
+          key: key,
+          iv: b64d(media['thumbIv'] as String),
+          aad: aad,
+          ciphertext: b64d(media['thumbCiphertext'] as String),
+        ),
+        plaintext,
+      );
+
+      // What the worker writes is what the vector-checked implementation writes
+      final big = Uint8List.fromList(List.generate(70000, (i) => (i * 7) % 256));
+      final made = await MediaWorker.encryptTiers(
+        key: key,
+        tiers: {'thumb': plaintext, 'original': big},
+        aads: {'thumb': aad, 'original': Aad.mediaBlob(mediaId, 'original')},
+      );
+      expect(
+        made['thumb']!.data,
+        CryptoService.encrypt(plaintext: plaintext, key: key, iv: b64d(made['thumb']!.iv), aad: aad),
+      );
+      expect(
+        made['original']!.data,
+        CryptoService.encrypt(
+            plaintext: big, key: key, iv: b64d(made['original']!.iv), aad: Aad.mediaBlob(mediaId, 'original')),
+      );
+      // The caller's key is theirs to zero; the worker only wiped its copy
+      expect(_toHex(key), media['key']);
+
+      // A flipped bit, the wrong tier and a truncated blob are all refused
+      final tampered = Uint8List.fromList(made['original']!.data)..[5] ^= 1;
+      for (final attempt in [
+        (data: tampered, aad: Aad.mediaBlob(mediaId, 'original')),
+        (data: made['original']!.data, aad: Aad.mediaBlob(mediaId, 'preview')),
+        (data: Uint8List(8), aad: aad),
+      ]) {
+        await expectLater(
+          MediaWorker.decrypt(
+              key: key, iv: b64d(made['original']!.iv), aad: attempt.aad, ciphertext: attempt.data),
+          throwsA(anything),
+        );
+      }
+    });
+
+    test('what this app writes is what the web client writes', () async {
+      final vaultId = vault['id'] as String;
+      final albumId = album['id'] as String;
+      final mediaId = media['id'] as String;
+      final vaultKey = _hex(vault['key'] as String);
+      final albumKey = _hex(album['key'] as String);
+      final mediaKey = _hex(media['key'] as String);
+      String gcm(Uint8List plaintext, Uint8List key, String iv, Uint8List aad) =>
+          b64e(CryptoService.encrypt(plaintext: plaintext, key: key, iv: b64d(iv), aad: aad));
+
+      final creator = vault['creator'] as Map<String, dynamic>;
+      final grant = await VaultCryptoCubit.wrapCreatorGrant(
+        vaultKey: vaultKey,
+        passphrase: vault['passphrase'] as String,
+        vaultId: vaultId,
+        userId: owner['userId'] as String,
+        encPk: b64d(owner['publicEncKey'] as String),
+        salt: b64d(creator['kdfSalt'] as String),
+        innerIv: b64d(creator['innerIv'] as String),
+        ephSk: b64d(creator['ephSk'] as String),
+        iv: b64d(creator['iv'] as String),
+      );
+      expect(grant.wrappedKey, creator['wrappedKey']);
+      expect(grant.kdfSalt, creator['kdfSalt']);
+
+      expect(
+        gcm(_utf8(vault['label'] as String), vaultKey, vault['labelNonce'] as String, Aad.vaultLabel(vaultId)),
+        vault['labelEncrypted'],
+      );
+      expect(
+        gcm(albumKey, vaultKey, album['keyNonce'] as String, Aad.albumKey(albumId, vaultId)),
+        album['keyWrapped'],
+      );
+      expect(
+        gcm(_utf8(album['name'] as String), albumKey, album['nameNonce'] as String, Aad.albumName(albumId)),
+        album['nameEncrypted'],
+      );
+      expect(
+        gcm(mediaKey, vaultKey, media['vaultWrap']['nonce'] as String, Aad.mediaKeyVault(mediaId, vaultId)),
+        media['vaultWrap']['wrapped'],
+      );
+      expect(
+        gcm(mediaKey, albumKey, media['albumWrap']['nonce'] as String, Aad.mediaKeyAlbum(mediaId, albumId)),
+        media['albumWrap']['wrapped'],
+      );
+      expect(
+        gcm(_utf8(media['meta'] as String), mediaKey, media['metaNonce'] as String, Aad.mediaMeta(mediaId)),
+        media['encryptedMeta'],
+      );
+    });
+
+    test('a vault, an album and an upload made here open again', () async {
+      final salt = KeyDerivation.generateSalt();
+      final masterKey = await KeyDerivation.deriveKek(passphrase: 'owner master', salt: salt);
+      final bundle = IdentityCrypto.encryptBundle(
+        masterKey: masterKey,
+        userId: owner['userId'] as String,
+        encSk: b64d(owner['encSk'] as String),
+        signSk: b64d(owner['signSk'] as String),
+        ownerSignPk: ownerSignPk,
+      );
+      final ownerAccount = accountOf(owner, kdfSalt: b64e(salt), enc: bundle.encrypted, nonce: bundle.nonce);
+      final cubit = VaultCryptoCubit();
+      expect(await cubit.unlockAccount(account: ownerAccount, passphrase: 'owner master'), true);
+
+      // Vault: only the stored rows and the passphrase are needed to open it again
+      final made = await cubit.createVault(passphrase: 'a new vault', label: '  Trips ');
+      final newKey = _toHex(made.match.key);
+      expect(made.match.label, 'Trips');
+      cubit.discardMatches([made.match]);
+      expect(made.match.key.every((b) => b == 0), true);
+
+      final stored = VaultInfo(
+        id: made.vault.id,
+        role: 'creator',
+        permission: 'write',
+        wrappedKey: made.vault.wrappedKey,
+        kdfSalt: made.vault.kdfSalt,
+        labelEncrypted: made.vault.labelEncrypted,
+        labelNonce: made.vault.labelNonce,
+      );
+      expect(await cubit.findMatches(passphrase: 'wrong', vaults: [stored]), isEmpty);
+      final matches = await cubit.findMatches(passphrase: 'a new vault', vaults: [stored]);
+      expect(_toHex(matches.single.key), newKey);
+      expect(matches.single.label, 'Trips');
+      cubit.selectVault(matches.single, matches);
+      final vaultId = made.vault.id;
+
+      // A vault without a label stores none
+      final unnamed = await cubit.createVault(passphrase: 'x', label: '  ');
+      expect(unnamed.vault.labelEncrypted, isNull);
+      expect(unnamed.match.label, 'New vault');
+      cubit.discardMatches([unnamed.match]);
+
+      // Album: created, renamed, and read back by a keyring that has only the vault key
+      final newAlbum = cubit.createAlbum(vaultId: vaultId, name: 'Beach');
+      expect(cubit.hasAlbumKey(newAlbum.id), true);
+      final renamed = cubit.encryptAlbumName(albumId: newAlbum.id, name: 'Beach 2025');
+
+      // Upload: into the album, so the key is wrapped under both
+      const mediaId = '0f0e0d0c-0b0a-4908-8706-050403020100';
+      final thumb = Uint8List.fromList(List.generate(300, (i) => i % 251));
+      final preview = Uint8List.fromList(List.generate(5000, (i) => i % 253));
+      final original = Uint8List.fromList(List.generate(200000, (i) => i % 255));
+      final encrypted = await cubit.encryptMedia(
+        mediaId: mediaId,
+        vaultId: vaultId,
+        albumId: newAlbum.id,
+        thumb: thumb,
+        preview: preview,
+        original: original,
+        meta: {'filename': 'IMG_1.jpg', 'gpsLatitude': 1.5},
+      );
+      expect({encrypted.thumb.iv, encrypted.preview.iv, encrypted.original.iv}, hasLength(3));
+      expect(encrypted.original.data.length, original.length + 16);
+
+      // Lock, then start again from what the server would hold
+      cubit.lock();
+      expect(await cubit.unlockAccount(account: ownerAccount, passphrase: 'owner master'), true);
+      final again = await cubit.findMatches(passphrase: 'a new vault', vaults: [stored]);
+      cubit.selectVault(again.single, again);
+      expect(cubit.hasAlbumKey(newAlbum.id), false);
+      final names = cubit.openAlbums(vaultId, [
+        (
+          id: newAlbum.id,
+          keyWrapped: newAlbum.keyWrapped as String?,
+          keyNonce: newAlbum.keyNonce as String?,
+          nameEncrypted: renamed.encrypted as String?,
+          nameNonce: renamed.nonce as String?,
+        ),
+      ]);
+      expect(names[newAlbum.id], 'Beach 2025');
+
+      final viaVault = MediaKeyRef(
+        scope: 'vault',
+        vaultId: vaultId,
+        wrapped: encrypted.vaultKey!.wrapped,
+        nonce: encrypted.vaultKey!.nonce,
+      );
+      final viaAlbum = MediaKeyRef(
+        scope: 'album',
+        vaultId: vaultId,
+        albumId: newAlbum.id,
+        wrapped: encrypted.albumKey!.wrapped,
+        nonce: encrypted.albumKey!.nonce,
+      );
+      for (final ref in [viaVault, viaAlbum]) {
+        expect(
+          cubit.decryptMedia(
+              mediaId: mediaId, tier: 'thumb', key: ref, ivB64: encrypted.thumb.iv, encryptedBlob: encrypted.thumb.data),
+          thumb,
+        );
+        expect(
+          await cubit.decryptMediaInBackground(
+              mediaId: mediaId,
+              tier: 'original',
+              key: ref,
+              ivB64: encrypted.original.iv,
+              encryptedBlob: encrypted.original.data),
+          original,
+        );
+        expect(
+          cubit.decryptMeta(mediaId: mediaId, key: ref, encrypted: encrypted.encryptedMeta, nonce: encrypted.metaNonce),
+          '{"filename":"IMG_1.jpg","gpsLatitude":1.5}',
+        );
+      }
+
+      // Bound to its item and its tier: neither can be swapped
+      await expectLater(
+        cubit.decryptMediaInBackground(
+            mediaId: mediaId,
+            tier: 'preview',
+            key: viaVault,
+            ivB64: encrypted.original.iv,
+            encryptedBlob: encrypted.original.data),
+        throwsA(anything),
+      );
+      expect(
+        cubit.decryptMeta(
+            mediaId: 'another-item', key: viaVault, encrypted: encrypted.encryptedMeta, nonce: encrypted.metaNonce),
+        isNull,
+      );
+
+      // Re-wrapping gives the same item key under the other scope
+      final toAlbum = cubit.rewrapMediaKey(mediaId: mediaId, key: viaVault, albumId: newAlbum.id);
+      final toVault = cubit.rewrapMediaKey(mediaId: mediaId, key: viaAlbum, vaultId: vaultId);
+      for (final ref in [
+        MediaKeyRef(scope: 'album', vaultId: vaultId, albumId: newAlbum.id, wrapped: toAlbum.wrapped, nonce: toAlbum.nonce),
+        MediaKeyRef(scope: 'vault', vaultId: vaultId, wrapped: toVault.wrapped, nonce: toVault.nonce),
+      ]) {
+        expect(
+          cubit.decryptMedia(
+              mediaId: mediaId,
+              tier: 'preview',
+              key: ref,
+              ivB64: encrypted.preview.iv,
+              encryptedBlob: encrypted.preview.data),
+          preview,
+        );
+      }
+      expect(() => cubit.rewrapMediaKey(mediaId: mediaId, key: viaVault), throwsArgumentError);
+
+      // With only the album key, an upload carries no vault-wrapped key
+      cubit.closeVault();
+      await expectLater(
+        cubit.encryptMedia(
+            mediaId: mediaId, vaultId: vaultId, thumb: thumb, preview: preview, original: original, meta: const {}),
+        throwsStateError,
+      );
       cubit.lock();
     });
   });

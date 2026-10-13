@@ -11,6 +11,8 @@ import { RefreshToken } from './entities/refresh-token.entity';
 import { VaultMember } from '../vault/entities/vault-member.entity';
 import { AlbumMember } from '../album/entities/album-member.entity';
 import { AuthService } from '../auth/auth.service';
+import { Vault } from '../vault/entities/vault.entity';
+import { BlobPurgeService } from '../storage/blob-purge.service';
 import { PublicUserKeys, UserRole, UserStatus, VaultMemberRole } from '../../common/types';
 import { INVITE_EXPIRY_HOURS, MAX_USERS, PG_UNIQUE_VIOLATION } from '../../common/constants';
 import { AcceptInviteDto, CreateInviteDto } from './dto/invite.dto';
@@ -39,6 +41,7 @@ export class UserService {
     @InjectRepository(UserInvite) private readonly inviteRepo: Repository<UserInvite>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly authService: AuthService,
+    private readonly blobPurge: BlobPurgeService,
   ) {}
 
   /** The caller's own account, with the encrypted private keys only they can open. */
@@ -298,6 +301,48 @@ export class UserService {
       await manager.delete(AlbumMember, { userId: user.id });
     });
     this.logger.warn(`User restricted: ${user.username}`);
+  }
+
+  /** A user the owner may delete: anyone but the owner account. */
+  private async findDeletable(ownerId: string, userId: string): Promise<User> {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    if (user.id === ownerId || user.role === UserRole.OWNER) {
+      throw new ForbiddenException('The owner account cannot be deleted');
+    }
+    return user;
+  }
+
+  /** Owner: what deleting this user would erase. Asked for only when the owner is about to delete. */
+  async deletionSummary(ownerId: string, userId: string): Promise<{ username: string; vaults: number; items: number }> {
+    const user = await this.findDeletable(ownerId, userId);
+    const [row]: { vaults: string; items: string }[] = await this.dataSource.query(
+      `SELECT (SELECT COUNT(*) FROM vaults v WHERE v.created_by = $1) AS vaults,
+              (SELECT COUNT(*) FROM media m JOIN vaults v ON v.id = m.vault_id WHERE v.created_by = $1) AS items`,
+      [user.id],
+    );
+    return { username: user.username, vaults: Number(row.vaults), items: Number(row.items) };
+  }
+
+  /**
+   * Owner: delete an account for good. The vaults the user created go with it,
+   * with everything in them and for everyone they were shared with; so does
+   * everything that was shared with the user, and every session.
+   */
+  async deleteUser(ownerId: string, userId: string): Promise<void> {
+    const user = await this.findDeletable(ownerId, userId);
+    await this.dataSource.transaction(async (manager) => {
+      const vaults = await manager.find(Vault, { where: { createdBy: user.id }, select: { id: true } });
+      await this.blobPurge.queueVaults(manager, vaults.map((v) => v.id));
+      // An invite carries the user id without a foreign key
+      await manager.delete(UserInvite, { userId: user.id });
+      // Sessions, vaults, memberships and the user's Liked albums go with the row
+      await manager.delete(User, { id: user.id });
+    });
+    void this.blobPurge.purge();
+    this.logger.warn(`User deleted: ${user.username}`);
   }
 
   private summary(user: User) {

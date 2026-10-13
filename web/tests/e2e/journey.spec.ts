@@ -597,6 +597,85 @@ test('theme choice applies and survives a reload', async () => {
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 });
 
+test('deleting a photo, a selection, an album, a user and a vault', async () => {
+  await openSection(page, 'Timeline');
+  await expectTilesDecrypted(page, 6);
+
+  // One photo, from the viewer: it steps to the next one rather than closing
+  await tiles(page).first().getByRole('button', { name: /^(Photo|Video)/ }).click();
+  await page.getByTestId('viewer').getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Delete this item?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page.getByText('Deleted', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('viewer')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('viewer')).toBeHidden();
+  await expectTilesDecrypted(page, 5);
+
+  // A selection: cancelling keeps everything
+  await tiles(page).nth(0).hover();
+  await tiles(page).nth(0).getByRole('checkbox').click();
+  await tiles(page).nth(1).getByRole('button', { name: /^(Photo|Video)/ }).click();
+  const toolbar = page.getByRole('toolbar', { name: 'Selection' });
+  await toolbar.getByRole('button', { name: 'Delete' }).click();
+  const confirm = page.getByRole('dialog', { name: 'Delete 2 items?' });
+  await confirm.getByRole('button', { name: 'Cancel' }).click();
+  await expect(tiles(page)).toHaveCount(5);
+  await toolbar.getByRole('button', { name: 'Delete' }).click();
+  await confirm.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page.getByText('Deleted 2 items')).toBeVisible();
+  await expect(toolbar).toBeHidden();
+  await expectTilesDecrypted(page, 3);
+  // Still gone after everything is fetched again
+  await page.reload();
+  await unlock(page, OWNER.passphrase);
+  await enterPassphrase(page, passphrase);
+  await picker(page, familyLabel);
+  await expectTilesDecrypted(page, 3);
+
+  // An album: its photos stay in the timeline
+  await openSection(page, 'Albums');
+  await page.getByRole('link', { name: /Road trip/ }).click();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Delete Road trip?' }).getByRole('button', { name: 'Delete album' }).click();
+  await expect(page.getByText('Deleted Road trip')).toBeVisible();
+  await expect(page).toHaveURL(/\/albums$/);
+  await expect(page.getByRole('link', { name: /Road trip/ })).toHaveCount(0);
+  await openSection(page, 'Timeline');
+  await expectTilesDecrypted(page, 3);
+
+  // A user: the name has to be typed
+  await openSection(page, 'Settings');
+  await page.getByRole('button', { name: 'Manage users' }).click();
+  await page.getByTestId(`user-${memberName}`).getByRole('button', { name: 'Delete' }).click();
+  const deleteUser = page.getByRole('dialog', { name: `Delete ${memberName}?` });
+  await expect(deleteUser.getByRole('button', { name: 'Delete user' })).toBeDisabled();
+  await deleteUser.getByLabel(`Type ${memberName} to confirm`).fill(memberName);
+  await deleteUser.getByRole('button', { name: 'Delete user' }).click();
+  await expect(page.getByText(`${memberName} is deleted`)).toBeVisible();
+  await expect(page.getByTestId(`user-${memberName}`)).toHaveCount(0);
+  await expect(ApiUser.signIn({ username: memberName, password: MEMBER_PASSWORD, passphrase: MEMBER_PASSPHRASE })).rejects.toBeInstanceOf(ApiError);
+  await page.getByRole('link', { name: 'Back' }).click();
+
+  // The vault: only with its passphrase
+  await openSection(page, 'Settings');
+  await page.getByRole('button', { name: 'Delete vault' }).click();
+  const deleteVault = page.getByRole('dialog', { name: `Delete ${familyLabel}?` });
+  await expect(deleteVault).toContainText('3 items');
+  await deleteVault.getByLabel('Vault passphrase', { exact: true }).fill(`${passphrase} wrong`);
+  await deleteVault.getByRole('button', { name: 'Delete vault' }).click();
+  await expect(deleteVault.getByRole('alert')).toHaveText('Wrong passphrase');
+  await expect(page.getByTestId('vault-label')).toHaveText(familyLabel);
+  await deleteVault.getByLabel('Vault passphrase', { exact: true }).fill(passphrase);
+  await deleteVault.getByRole('button', { name: 'Delete vault' }).click();
+  await expect(page.getByText(`Deleted ${familyLabel}`)).toBeVisible();
+  await expect(page).toHaveURL(/\/unlock$/);
+
+  // The passphrase that used to match two vaults now opens the one that is left
+  await enterPassphrase(page, passphrase);
+  await expect(page.getByTestId('vault-label')).toHaveText(workLabel);
+  await openSection(page, 'Settings');
+});
+
 test('logout returns to sign-in and nothing broke along the way', async () => {
   await page.getByRole('button', { name: 'Logout' }).click();
   await expect(page).toHaveURL(/\/login$/);

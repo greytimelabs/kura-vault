@@ -39,6 +39,25 @@ class VaultCubit extends Cubit<VaultState> {
     }
   }
 
+  /// Store a vault made by [VaultCryptoCubit.createVault]. The server gets
+  /// only its wrapped key, its salt and its encrypted label.
+  Future<void> createVault(NewVault vault) async {
+    await _apiClient.dio.post(ApiEndpoints.vaults, data: {
+      'id': vault.id,
+      'wrappedKey': vault.wrappedKey,
+      'kdfSalt': vault.kdfSalt,
+      if (vault.labelEncrypted != null && vault.labelNonce != null) ...{
+        'labelEncrypted': vault.labelEncrypted,
+        'labelNonce': vault.labelNonce,
+      },
+    });
+  }
+
+  /// Erase a vault and everything in it, for everyone it is shared with. Only
+  /// its creator can; the caller has checked the vault passphrase first.
+  Future<void> deleteVault(String vaultId) =>
+      _apiClient.dio.delete(ApiEndpoints.vault(vaultId));
+
   /// Albums shared with this account on their own.
   Future<List<SharedAlbumInfo>> fetchSharedAlbums() async {
     final response = await _apiClient.dio.get(ApiEndpoints.sharedAlbums);

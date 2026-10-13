@@ -64,19 +64,11 @@ export class StorageService {
   }
 
   /**
-   * Delete an encrypted blob from S3.
+   * Delete an encrypted blob from S3. Deleting what is not there succeeds.
+   * Throws when storage cannot be reached; the caller keeps the key and retries.
    */
   async deleteObject(s3Key: string): Promise<void> {
-    try {
-      const command = new DeleteObjectCommand({
-        Bucket: this.bucketName,
-        Key: s3Key,
-      });
-      await this.s3Client.send(command);
-    } catch (error) {
-      this.logger.error(`Failed to delete S3 object: ${s3Key}`, error);
-      throw error;
-    }
+    await this.s3Client.send(new DeleteObjectCommand({ Bucket: this.bucketName, Key: s3Key }));
   }
 
   /**

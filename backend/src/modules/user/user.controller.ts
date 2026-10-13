@@ -84,6 +84,21 @@ export class UserController {
     return this.userService.updateUser(user.sub, userId, dto);
   }
 
+  @Get(':id/deletion-summary')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER)
+  async deletionSummary(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) userId: string) {
+    return this.userService.deletionSummary(user.sub, userId);
+  }
+
+  @Delete(':id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER)
+  async remove(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) userId: string) {
+    await this.userService.deleteUser(user.sub, userId);
+    return null;
+  }
+
   @Put(':id/cert')
   @UseGuards(RolesGuard)
   @Roles(UserRole.OWNER)
