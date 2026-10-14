@@ -210,11 +210,22 @@ Changes are expected to keep all of these true.
 **Data and deployment**
 
 18. TypeORM `synchronize` is always off; schema changes are migrations.
-19. Containers run as a non-root user (UID 1001) with `no-new-privileges`;
-    PostgreSQL runs with a read-only root filesystem.
-20. The web client ships a strict Content-Security-Policy and should have its
-    storage origin narrowed to the real bucket in production
-    (see [getting started](getting-started.md#production-build)).
+19. The deployment (`deploy/docker-compose.yml`) publishes one port, on
+    loopback by default. The database and bundled storage sit on internal
+    networks. Every container has a read-only root filesystem, no Linux
+    capabilities and `no-new-privileges`. The server, web and database run as
+    non-root users.
+20. The web image sends a strict Content-Security-Policy from nginx. With the
+    bundled storage, `connect-src` is `'self'` only. With an external bucket,
+    it is narrowed to that bucket's origin (`S3_ORIGIN`). Static builds carry
+    the policy in a `<meta>` tag instead.
+20a. Security settings are explicit, never inferred from `NODE_ENV`: database
+    TLS (`POSTGRES_SSL`), the refresh cookie's `Secure` flag (the scheme of
+    `PUBLIC_URL`, which must be `https://` outside localhost), and how many
+    proxies are trusted for the client address (`TRUST_PROXY`, never `true`).
+20b. Published images are built only by the release workflow, scanned in CI,
+    carry SBOM and provenance attestations, and are signed with cosign
+    (keyless). See [self-hosting](self-hosting.md#verify-the-images).
 
 **Cryptography**
 

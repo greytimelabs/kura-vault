@@ -101,8 +101,9 @@ export class AuthController {
     return {
       httpOnly: true,
       sameSite: 'strict',
-      // Safari drops Secure cookies on http://localhost, so only require it in production
-      secure: this.configService.get<string>('app.nodeEnv') === 'production',
+      // Secure whenever users reach the server over https (PUBLIC_URL); Safari drops
+      // Secure cookies on http://localhost, so development without it stays usable
+      secure: this.configService.get<boolean>('app.secureCookies') === true,
       path: REFRESH_COOKIE_PATH,
     };
   }

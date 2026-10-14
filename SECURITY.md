@@ -3,6 +3,14 @@
 Kura Vault exists to keep private media private, so reports are taken
 seriously. The project has not had an independent security audit.
 
+## Supported versions
+
+Security fixes go into the latest release, which is published as new images.
+Upgrade by changing `KURA_VERSION` (see
+[upgrades](docs/self-hosting.md#upgrades)). Older releases are not patched.
+Before running an image, you can check that this repository's release workflow
+built and signed it: see [verify the images](docs/self-hosting.md#verify-the-images).
+
 ## Reporting a vulnerability
 
 Please do not open a public issue for a security problem.

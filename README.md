@@ -36,10 +36,26 @@ it never sees a passphrase, a key, or a decrypted file.
 | [`web/`](web) | Browser client | React, TypeScript, Vite |
 | [`app/`](app) | Mobile client | Flutter (BLoC) |
 | [`migration-cli/`](migration-cli) | Bulk encrypt-and-upload tool | Node.js |
+| [`deploy/`](deploy) | Production Docker Compose bundle and installer | Docker Compose, Garage |
 | [`crypto-vectors.json`](crypto-vectors.json) | Shared test vectors that keep the three clients byte-compatible | |
 | [`docs/`](docs) | All project documentation | |
 
-## Quick start
+## Self-host
+
+Run your own server from the published, signed images (amd64 and arm64):
+
+```bash
+curl -fsSLO https://github.com/greytimelabs/kura-vault/releases/latest/download/install.sh
+less install.sh && sh install.sh
+```
+
+This brings up the API, the web client, PostgreSQL and bundled object storage
+with Docker Compose. Put your HTTPS reverse proxy in front, and you're done.
+HTTPS is required. Users of the mobile apps type your address into the app.
+See the [self-hosting guide](docs/self-hosting.md) for the manual steps,
+storage options, proxy examples, backups and upgrades.
+
+## Development quick start
 
 Requires Node.js 24, pnpm, Docker, and an S3-compatible bucket (AWS S3 or
 Cloudflare R2).
@@ -69,6 +85,7 @@ the mobile app, the import CLI and the tests, are in
 
 ## Documentation
 
+- [Self-hosting](docs/self-hosting.md): deploy a server from the published images
 - [Getting started](docs/getting-started.md): run every component locally
 - [Architecture](docs/architecture.md): components, data flow, API surface
 - [Cryptography](docs/crypto/README.md): algorithms, key hierarchy, wire format

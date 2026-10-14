@@ -19,6 +19,19 @@ Run the checks for whatever you touched:
 | `migration-cli/` | `pnpm test` and `pnpm build` |
 | `app/` | `flutter analyze` and `flutter test` |
 
+CI runs all of these, plus the server-rules suite (`pnpm test:api`). It also
+builds both images, scans them, and smoke-tests the `deploy/` bundle end to
+end. If you change `deploy/`, a Dockerfile or `web/nginx.conf`, run the bundle
+locally the way [self-hosting](docs/self-hosting.md) describes, with
+`tests/deploy/smoke.ts` in `web/`.
+
+## Releases
+
+Maintainers tag `vX.Y.Z` on `main`. The release workflow then builds and signs
+the images for amd64 and arm64, pushes them to GHCR (and Docker Hub when
+configured), and attaches the `deploy/` bundle with `SHA256SUMS` to the GitHub
+Release. Note anything operators must do in `CHANGELOG.md` before tagging.
+
 ## Rules that are not negotiable
 
 - **The three clients must stay byte-compatible.** If you change anything in

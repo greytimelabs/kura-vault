@@ -1,21 +1,47 @@
-FROM node:24-alpine AS build
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Base images are pinned by digest; Dependabot keeps them current.
+ARG NODE_IMAGE=node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
+ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.29-alpine@sha256:0c79d56aee561a1d81c63f00eee5fb5fe29279560cdc55e91425133104c7fbe6
+
+FROM ${NODE_IMAGE} AS build
+# pnpm comes from the exact version in package.json's packageManager field
+RUN corepack enable
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY . .
-# Narrow the baked-in policy to the real bucket: --build-arg VITE_S3_ORIGIN=https://<bucket>.s3.<region>.amazonaws.com
-# (for Cloudflare R2: https://<account-id>.r2.cloudflarestorage.com)
-ARG VITE_S3_ORIGIN
-ENV VITE_S3_ORIGIN=$VITE_S3_ORIGIN
+# The policy is sent by nginx, set per deployment at run time (S3_ORIGIN), not baked in
+ENV VITE_CSP_META=false
 # A client hosted apart from any server, where users type their server address:
 # --build-arg VITE_MULTI_SERVER=true, and run with S3_ORIGIN=https: (see docs/getting-started.md)
 ARG VITE_MULTI_SERVER
 ENV VITE_MULTI_SERVER=$VITE_MULTI_SERVER
 RUN pnpm exec vite build
 
-FROM nginxinc/nginx-unprivileged:alpine
+FROM ${NGINX_IMAGE}
 COPY nginx.conf /etc/nginx/templates/default.conf.template
+COPY --chmod=755 docker-entrypoint.d/40-kura-config.sh /docker-entrypoint.d/40-kura-config.sh
 COPY --from=build /app/dist /usr/share/nginx/html
-ENV API_UPSTREAM=http://backend:3000 S3_ORIGIN=https://*.amazonaws.com
+
+ARG APP_VERSION=dev
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.title="Kura Vault web" \
+      org.opencontainers.image.description="Web client for Kura Vault, served with nginx; proxies the API and the bundled bucket" \
+      org.opencontainers.image.source="https://github.com/greytimelabs/kura-vault" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
+# S3_ORIGIN: an external bucket's origin, for the policy. Empty when the bucket is
+# served from this origin (S3_PROXY_UPSTREAM). Only API_UPSTREAM and the resolver are
+# substituted in the template; the other values are checked and rendered by 40-kura-config.sh
+ENV API_UPSTREAM=http://server:3000 \
+    S3_ORIGIN= \
+    S3_PROXY_UPSTREAM= \
+    S3_BUCKET_NAME= \
+    NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1 \
+    NGINX_ENVSUBST_FILTER=^(API_UPSTREAM|NGINX_LOCAL_RESOLVERS)$
+
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -q --spider http://127.0.0.1:8080/healthz || exit 1

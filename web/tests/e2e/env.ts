@@ -6,7 +6,8 @@ export const WEB_URL = `http://localhost:${WEB_PORT}`;
 // A second build of the client in multi-server mode, served apart from the API
 export const MULTI_WEB_PORT = 5274;
 export const MULTI_WEB_URL = `http://localhost:${MULTI_WEB_PORT}`;
-export const API_URL = `http://localhost:${API_PORT}/api/v1`;
+// The deployment smoke test (tests/deploy) points the same client at a running stack
+export const API_URL = process.env.E2E_API_URL ?? `http://localhost:${API_PORT}/api/v1`;
 
 export const DB_CONTAINER = 'kuravault-e2e-db';
 export const DB = {
@@ -33,7 +34,7 @@ export const OWNER = {
 
 /** Environment for the backend instance the tests run against. */
 export const backendEnv: Record<string, string> = {
-  // 'test' keeps SQL logging off; cookies are non-Secure outside production either way
+  // 'test' keeps SQL logging off; without PUBLIC_URL the cookie is not Secure, as on http://localhost
   NODE_ENV: 'test',
   PORT: String(API_PORT),
   POSTGRES_HOST: DB.host,

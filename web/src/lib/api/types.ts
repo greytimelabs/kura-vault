@@ -17,6 +17,8 @@ export interface ServerInfo {
   status: string;
   app?: string;
   apiVersion?: string;
+  /** Server release, e.g. 1.2.0; `dev` for an unreleased build */
+  version?: string;
   /** True until the server's owner account has been created with the setup key. */
   setupRequired?: boolean;
 }

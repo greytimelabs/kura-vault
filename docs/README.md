@@ -8,6 +8,7 @@ kept in sync with the code.
 
 | Page | What it covers |
 |---|---|
+| [Self-hosting](self-hosting.md) | Deploying a server from the published images: install, HTTPS, storage, backups, upgrades, verifying signatures |
 | [Getting started](getting-started.md) | Running the database, API, web client, mobile app and import CLI locally; running the tests |
 | [Architecture](architecture.md) | Components, accounts and sharing, setup, upload and viewing flows, the API surface |
 | [Cryptography](crypto/README.md) | Algorithms, key hierarchy, how public keys are trusted, wire format, the shared test vectors |

@@ -2,7 +2,7 @@ import { UnauthorizedException } from '@nestjs/common';
 import { AuthController } from './auth.controller';
 import { REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH } from '../../common/constants';
 
-function makeController(nodeEnv = 'development') {
+function makeController(secureCookies = false) {
   const authService = {
     login: jest.fn(async () => ({
       accessToken: 'access',
@@ -17,7 +17,7 @@ function makeController(nodeEnv = 'development') {
     })),
     logout: jest.fn(async () => undefined),
   };
-  const configService = { get: jest.fn(() => nodeEnv) };
+  const configService = { get: jest.fn((key: string) => (key === 'app.secureCookies' ? secureCookies : undefined)) };
   const controller = new AuthController(authService as any, configService as any);
   const res = { cookie: jest.fn(), clearCookie: jest.fn() };
   return { controller, authService, res };
@@ -42,8 +42,8 @@ describe('AuthController refresh cookie', () => {
     );
   });
 
-  it('the cookie is Secure in production', async () => {
-    const { controller, res } = makeController('production');
+  it('the cookie is Secure when the server is reached over https', async () => {
+    const { controller, res } = makeController(true);
 
     await controller.login(credentials, webReq(), res as any);
 

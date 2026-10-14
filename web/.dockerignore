@@ -1,4 +1,13 @@
 node_modules
 dist
+dist-multi
 test-results
+playwright-report
+blob-report
 tests
+.git
+.env
+.env.*
+*.md
+Dockerfile
+.dockerignore

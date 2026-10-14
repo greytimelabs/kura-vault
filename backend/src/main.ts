@@ -1,17 +1,24 @@
+// Must stay first: loads .env and *_FILE secrets before any configuration is read
+import './config/load-env';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import cookieParser = require('cookie-parser');
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: ['error', 'warn', 'log'],
   });
 
   const config = app.get(ConfigService);
+
+  // Behind the web container (or another proxy), the client address is in X-Forwarded-For.
+  // Rate limiting and lockout key on it, so only the configured hops are believed
+  app.set('trust proxy', config.get('app.trustProxy'));
 
   // Security headers
   app.use(helmet({
@@ -26,7 +33,10 @@ async function bootstrap() {
         objectSrc: ["'none'"],
       },
     },
-    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+    // No preload and no subdomains by default: both reach beyond this server and are hard to undo
+    hsts: config.get<number>('app.hsts.maxAge')! > 0
+      ? { maxAge: config.get<number>('app.hsts.maxAge'), includeSubDomains: config.get<boolean>('app.hsts.includeSubDomains') }
+      : false,
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   }));
 
@@ -56,7 +66,7 @@ async function bootstrap() {
 
   const port = config.get<number>('app.port', 3000);
   await app.listen(port);
-  logger.log(`Kura Vault API running on port ${port}`);
+  logger.log(`Kura Vault API ${config.get('app.version')} running on port ${port}`);
 }
 
 bootstrap();

@@ -107,19 +107,21 @@ lost. Each vault you create has its own **vault passphrase** on top.
 
 ### Production build
 
-`web/Dockerfile` builds the static site and serves it with nginx, which also
-proxies `/api/` to the backend so everything stays on one origin.
+To deploy a server, use the published images and the `deploy/` bundle:
+[self-hosting](self-hosting.md). To build the images yourself:
 
 ```bash
-docker build -t kura-vault-web \
-  --build-arg VITE_S3_ORIGIN=https://<your-bucket-origin> web
-docker run -p 8080:8080 \
-  -e API_UPSTREAM=http://backend:3000 \
-  -e S3_ORIGIN=https://<your-bucket-origin> kura-vault-web
+docker build --target production -t kura-vault-server backend
+docker build -t kura-vault-web web
 ```
 
-`VITE_S3_ORIGIN` and `S3_ORIGIN` narrow the Content-Security-Policy to your
-bucket. They default to `https://*.amazonaws.com`.
+Then set `KURA_SERVER_IMAGE=kura-vault-server`, `KURA_WEB_IMAGE=kura-vault-web`
+and `KURA_VERSION=latest` in `deploy/.env`. The web image sends its
+Content-Security-Policy from nginx, set at run time from `S3_ORIGIN`.
+
+To host the static files elsewhere (`pnpm build`, then serve `web/dist`), the
+policy is in a `<meta>` tag instead. Narrow it to your bucket at build time with
+`VITE_S3_ORIGIN=https://<your-bucket-origin>`. It defaults to `https://*.amazonaws.com`.
 
 ### Multi-server build
 
@@ -132,6 +134,8 @@ docker build -t kura-vault-web-hosted \
   --build-arg VITE_MULTI_SERVER=true web
 docker run -p 8080:8080 -e S3_ORIGIN=https: kura-vault-web-hosted
 ```
+
+The published images are the single-server build; this one is built from source.
 
 In this mode the policy's `connect-src` allows any `https:` origin, because
 the servers and buckets are not known in advance, and refresh tokens are kept
@@ -265,21 +269,15 @@ the commands are at the top of that file.
 
 ## Environment reference
 
-Backend variables, validated at startup in `backend/src/config/validation.ts`:
+Backend variables are validated at startup in `backend/src/config/validation.ts`.
+For development, `backend/.env.example` has everything you need. The full list,
+for a deployed server, is in [self-hosting](self-hosting.md#configuration). For
+development, note:
 
-| Variable | Required | Default | Purpose |
-|---|---|---|---|
-| `POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | yes | | Database connection |
-| `POSTGRES_PORT` | no | `5432` | Use `5433` with the provided compose file |
-| `JWT_SECRET` | yes | | Signing key, 32+ characters |
-| `JWT_EXPIRATION` | no | `15m` | Access token lifetime |
-| `JWT_REFRESH_EXPIRATION` | no | `7d` | Refresh token lifetime |
-| `AWS_REGION` | no | `ap-south-1` | `auto` for R2 |
-| `S3_ENDPOINT` | no | | Set for S3-compatible services; leave unset for AWS |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | yes, for media | | Storage credentials |
-| `S3_BUCKET_NAME` | no | `kura-vault-storage` | |
-| `PORT` | no | `3000` | |
-| `NODE_ENV` | no | `development` | `production` enables secure cookies and hides validation details |
-| `CORS_ORIGINS` | no | `http://localhost:3000` | Comma-separated origins allowed to call the API cross-origin |
-| `THROTTLE_TTL`, `THROTTLE_LIMIT` | no | `60`, `100` | Rate limit: requests per window (seconds) |
-| `HASH_SALT_ROUNDS` | no | `12` | bcrypt cost for account passwords |
+| Variable | Development value | Why |
+|---|---|---|
+| `NODE_ENV` | `development` | Unset means `production`, which requires `PUBLIC_URL` |
+| `POSTGRES_PORT` | `5433` | The port of the compose database in the repository root |
+| `POSTGRES_SSL` | `disable` | TLS is set explicitly, never inferred from `NODE_ENV` |
+| `PUBLIC_URL` | unset | When unset, the refresh cookie is not `Secure`, which Safari needs on `http://localhost` |
+| `S3_ENDPOINT` | your R2 endpoint, or empty for AWS | |

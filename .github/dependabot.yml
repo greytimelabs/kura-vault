@@ -1,0 +1,30 @@
+# Keeps pinned dependencies current. Base images and actions are pinned by digest
+# or commit, so these updates are the only way they move.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories: [/backend, /web, /migration-cli]
+    schedule: { interval: weekly }
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: docker
+    directories: [/backend, /web]
+    schedule: { interval: weekly }
+
+  - package-ecosystem: docker-compose
+    directories: [/deploy]
+    schedule: { interval: weekly }
+    ignore:
+      # A PostgreSQL major upgrade needs a dump and restore; see docs/self-hosting.md
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      actions:
+        patterns: ['*']

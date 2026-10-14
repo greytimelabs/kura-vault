@@ -41,8 +41,12 @@ function cspMeta(): Plugin {
   };
 }
 
+// The Docker image sets the policy per deployment in an nginx header instead (VITE_CSP_META=false):
+// a meta policy is enforced alongside it and could not be widened to the operator's bucket
+const cspInMeta = process.env.VITE_CSP_META !== 'false';
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), cspMeta()],
+  plugins: [react(), tailwindcss(), ...(cspInMeta ? [cspMeta()] : [])],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },

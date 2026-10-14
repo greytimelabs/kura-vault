@@ -35,19 +35,7 @@ import { HealthModule } from './health/health.module';
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        type: 'postgres',
-        host: config.get('database.host'),
-        port: config.get('database.port'),
-        username: config.get('database.username'),
-        password: config.get('database.password'),
-        database: config.get('database.database'),
-        entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
-        synchronize: false,
-        logging: config.get('app.nodeEnv') === 'development',
-        ssl: config.get('app.nodeEnv') === 'production' ? { rejectUnauthorized: true } : false,
-      }),
+      useFactory: (config: ConfigService) => config.getOrThrow('database'),
     }),
 
     // Rate limiting

@@ -1,0 +1,134 @@
+# Kura Vault: production deployment.
+#
+#   1. cp example.env .env, then fill it in (or run install.sh, which does both)
+#   2. docker compose up -d
+#   3. Point your HTTPS reverse proxy at HTTP_BIND:HTTP_PORT (127.0.0.1:8080 by default)
+#
+# Full guide: https://github.com/greytimelabs/kura-vault/blob/main/docs/self-hosting.md
+#
+# Only the web container publishes a port. It serves the client, proxies /api/ to
+# the server and, with the bundled Garage, the bucket, all on one origin.
+
+name: kura-vault
+
+x-defaults: &defaults
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options: { max-size: 10m, max-file: "3" }
+
+services:
+  postgres:
+    <<: *defaults
+    image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    # The image's data directory already belongs to this user, so no root step is needed
+    user: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kuravault}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-kuravault}
+    volumes:
+      - db-data:/var/lib/postgresql
+    tmpfs: [/tmp, /run/postgresql]
+    shm_size: 128m
+    pids_limit: 200
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [db]
+
+  garage:
+    <<: *defaults
+    profiles: [garage]
+    image: dxflrs/garage:v2.4.1@sha256:9c96caa2612d3411acc5b0e6701fb238dbfba33e533a6d7d3d811a4b12d0d020
+    # One node, one bucket and one access key, created from the variables below on
+    # first start and left as they are on later starts
+    command: ["/garage", "server", "--single-node", "--default-bucket"]
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set GARAGE_RPC_SECRET in .env}
+      GARAGE_DEFAULT_ACCESS_KEY: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID in .env}
+      GARAGE_DEFAULT_SECRET_KEY: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY in .env}
+      GARAGE_DEFAULT_BUCKET: ${S3_BUCKET_NAME:-kura-blobs}
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      # A named volume by default; set KURA_MEDIA_DIR to a path to keep media on a disk of your choice
+      - ${KURA_MEDIA_DIR:-garage-data}:/var/lib/garage/data
+    tmpfs: [/tmp]
+    pids_limit: 200
+    healthcheck:
+      test: ["CMD", "/garage", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [storage]
+
+  server:
+    <<: *defaults
+    image: ${KURA_SERVER_IMAGE:-ghcr.io/greytimelabs/kura-vault-server}:${KURA_VERSION:?set KURA_VERSION in .env}
+    environment:
+      NODE_ENV: production
+      PUBLIC_URL: ${PUBLIC_URL:?set PUBLIC_URL in .env, e.g. https://vault.example.com}
+      # Exactly one hop in front: the web container
+      TRUST_PROXY: "1"
+      MIGRATIONS_RUN: "true"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-kuravault}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-kuravault}
+      POSTGRES_SSL: ${POSTGRES_SSL:-disable}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      SETUP_KEY: ${SETUP_KEY:-}
+      AWS_REGION: ${AWS_REGION:?set AWS_REGION in .env}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-kura-blobs}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100}
+    tmpfs: [/tmp]
+    pids_limit: 200
+    depends_on:
+      postgres: { condition: service_healthy }
+      garage: { condition: service_healthy, required: false }
+    # edge gives the server a way out, for external storage such as R2 or S3
+    networks: [db, storage, edge]
+
+  web:
+    <<: *defaults
+    image: ${KURA_WEB_IMAGE:-ghcr.io/greytimelabs/kura-vault-web}:${KURA_VERSION}
+    environment:
+      API_UPSTREAM: http://server:3000
+      S3_PROXY_UPSTREAM: ${S3_PROXY_UPSTREAM:-}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-kura-blobs}
+      S3_ORIGIN: ${S3_ORIGIN:-}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+    ports:
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:8080"
+    # nginx renders its config and keeps its temp files here
+    tmpfs:
+      - /tmp:uid=101,gid=101,mode=0700
+      - /etc/nginx/conf.d:uid=101,gid=101,mode=0755
+      - /var/cache/nginx:uid=101,gid=101,mode=0700
+    pids_limit: 100
+    depends_on:
+      server: { condition: service_healthy }
+    networks: [storage, edge]
+
+volumes:
+  db-data:
+  garage-meta:
+  garage-data:
+
+networks:
+  # No way in or out from the host or the internet: only the containers listed
+  db: { internal: true }
+  storage: { internal: true }
+  edge: {}
