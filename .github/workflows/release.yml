@@ -51,6 +51,20 @@ jobs:
         with:
           persist-credentials: false
 
+      # A tag must name the version the code carries (scripts/release.sh sets both)
+      - name: Check the tag matches the code
+        if: github.ref_type == 'tag'
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          bad=0
+          for pkg in backend/package.json web/package.json migration-cli/package.json; do
+            have=$(jq -r .version "$pkg")
+            [ "$have" = "$want" ] || { echo "::error file=$pkg::version is $have, tag is $GITHUB_REF_NAME"; bad=1; }
+          done
+          have=$(sed -nE 's/^version: *([^+ ]*).*/\1/p' app/pubspec.yaml)
+          [ "$have" = "$want" ] || { echo "::error file=app/pubspec.yaml::version is $have, tag is $GITHUB_REF_NAME"; bad=1; }
+          exit $bad
+
       - name: Version
         id: version
         run: |

@@ -27,10 +27,32 @@ locally the way [self-hosting](docs/self-hosting.md) describes, with
 
 ## Releases
 
-Maintainers tag `vX.Y.Z` on `main`. The release workflow then builds and signs
+Versions follow [Semantic Versioning](https://semver.org/), and the git tag
+`vX.Y.Z` is the source of truth:
+
+- **Major** (`2.0.0`): an operator must act to upgrade safely, or the
+  encryption format changes in a way older clients cannot read.
+- **Minor** (`1.1.0`): new features and settings that keep working setups working.
+- **Patch** (`1.0.1`): fixes only.
+- **Prerelease** (`1.1.0-rc.1`): published under its own tag only. `latest`
+  and the `1` / `1.1` tags don't move.
+
+To cut a release from a clean `main`:
+
+```sh
+# 1. Make sure CHANGELOG.md lists everything under [Unreleased]
+scripts/release.sh 1.1.0 --dry-run   # shows every change it would make
+scripts/release.sh 1.1.0             # sets the versions, dates the changelog, commits, tags
+git push origin main v1.1.0
+```
+
+The script sets the version in the three `package.json` files and
+`app/pubspec.yaml`, raising the app's build number. It never pushes. The release
+workflow refuses a tag that doesn't match those versions. It builds and signs
 the images for amd64 and arm64, pushes them to GHCR (and Docker Hub when
-configured), and attaches the `deploy/` bundle with `SHA256SUMS` to the GitHub
-Release. Note anything operators must do in `CHANGELOG.md` before tagging.
+configured) as `1.1.0`, `1.1`, `1` and `latest`, and attaches the `deploy/`
+bundle with `SHA256SUMS` to the GitHub Release. Mark anything operators must do
+with **Action** in `CHANGELOG.md` before tagging.
 
 ## Rules that are not negotiable
 

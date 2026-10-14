@@ -54,9 +54,13 @@ jobs:
           cache-dependency-path: |
             web/pnpm-lock.yaml
             backend/pnpm-lock.yaml
+            migration-cli/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm install --frozen-lockfile
         working-directory: backend
+      # The crypto tests check the web client against the import CLI's encryptor
+      - run: pnpm install --frozen-lockfile
+        working-directory: migration-cli
       - run: pnpm typecheck
       - run: pnpm test
       # The server's rules against a real backend and a throwaway PostgreSQL
