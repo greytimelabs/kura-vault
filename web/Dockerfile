@@ -1,6 +1,6 @@
 # Base images are pinned by digest; Dependabot keeps them current.
 ARG NODE_IMAGE=node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
-ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.29-alpine@sha256:0c79d56aee561a1d81c63f00eee5fb5fe29279560cdc55e91425133104c7fbe6
+ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.30-alpine@sha256:56b8272e43a0525f67aed68d1e0794a712d10e3e45a563e118e9a77c817e6f86
 
 FROM ${NODE_IMAGE} AS build
 # pnpm comes from the exact version in package.json's packageManager field
