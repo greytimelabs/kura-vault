@@ -42,7 +42,7 @@ it never sees a passphrase, a key, or a decrypted file.
 
 ## Self-host
 
-Run your own server from the published, signed images (amd64 and arm64):
+Run your own server from the published images (amd64 and arm64):
 
 ```bash
 curl -fsSLO https://github.com/greytimelabs/kura-vault/releases/latest/download/install.sh

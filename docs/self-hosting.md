@@ -13,7 +13,7 @@ For running from source (development), see [getting started](getting-started.md)
 - [Configuration](#configuration)
 - [Backups](#backups)
 - [Upgrades](#upgrades)
-- [Verify the images](#verify-the-images)
+- [Pin the images](#pin-the-images)
 - [How the deployment is hardened](#how-the-deployment-is-hardened)
 - [Troubleshooting](#troubleshooting)
 
@@ -323,9 +323,9 @@ docker compose up -d --wait
 Database migrations run when the new server starts. Going back to an older
 release after a migration is not supported. Restore the dump instead.
 
-**Tags.** Images are tagged `1.3.0`, `1.3`, `1`, `latest` and `edge` (the main
-branch, unreleased). Pin an exact version in `KURA_VERSION`, so nothing
-changes until you decide.
+**Tags.** Only releases publish images, tagged `1.3.0`, `1.3`, `1` and
+`latest`. A prerelease such as `1.4.0-rc.1` gets only its own tag. Pin an exact
+version in `KURA_VERSION`, so nothing changes until you decide.
 
 **PostgreSQL major versions** (such as 18 to 19) cannot read each other's data
 directory. The compose file only moves to a new major in a release that says so.
@@ -336,27 +336,20 @@ To move:
 3. Update the files.
 4. `docker compose up -d postgres`, then restore.
 
-## Verify the images
+## Pin the images
 
-Every image is built by this repository's release workflow and signed with
-[cosign](https://github.com/sigstore/cosign) through GitHub's OIDC identity.
-No key exists that could be stolen. To check an image before you run it:
+Every image is built by this repository's release workflow from a release tag,
+and each package on GHCR links to the workflow run that pushed it. Images are
+not signed and carry no SBOM or provenance attestation.
 
-```bash
-cosign verify ghcr.io/greytimelabs/kura-vault-server:1.2.0 \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/greytimelabs/kura-vault/\.github/workflows/release\.yml@refs/tags/v'
-```
-
-Do the same for `kura-vault-web`, or for the `docker.io/greytimelabs/...` mirror.
-Each image also carries a build provenance attestation and an SBOM:
+A tag can be moved; a digest cannot. To make sure you keep running exactly the
+image you checked, look up its digest:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/greytimelabs/kura-vault-server:1.2.0 --format '{{ json .Provenance }}'
-docker buildx imagetools inspect ghcr.io/greytimelabs/kura-vault-server:1.2.0 --format '{{ json .SBOM }}'
+docker buildx imagetools inspect ghcr.io/greytimelabs/kura-vault-server:1.2.0 --format '{{ json .Manifest.Digest }}'
 ```
 
-To make sure you run exactly what you verified, use the digest:
+Then use it:
 `KURA_SERVER_IMAGE=ghcr.io/greytimelabs/kura-vault-server@sha256:…`. Do the
 same for the web image, and leave `KURA_VERSION` set, since it is still
 required. Or pin the digest in a compose override.
@@ -381,9 +374,8 @@ required. Or pin the digest in a compose override.
   configuration, and the web container validates every value it puts into its
   nginx configuration or headers.
 - **Logs are rotated** (3 × 10 MB per container).
-- **Images are minimal, scanned and signed:** the server image has no npm,
-  corepack or yarn. Each build is scanned for known vulnerabilities in CI,
-  and every published image is signed.
+- **Images are minimal and scanned:** the server image has no npm,
+  corepack or yarn. Each build is scanned for known vulnerabilities in CI.
 
 The security model of the application itself is in [security.md](security.md).
 

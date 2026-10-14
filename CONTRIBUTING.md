@@ -48,10 +48,11 @@ git push origin main v1.1.0
 
 The script sets the version in the three `package.json` files and
 `app/pubspec.yaml`, raising the app's build number. It never pushes. The release
-workflow refuses a tag that doesn't match those versions. It builds and signs
-the images for amd64 and arm64, pushes them to GHCR (and Docker Hub when
-configured) as `1.1.0`, `1.1`, `1` and `latest`, and attaches the `deploy/`
-bundle with `SHA256SUMS` to the GitHub Release. Mark anything operators must do
+workflow refuses a tag that doesn't match those versions. It builds the images
+for amd64 and arm64, pushes them to GHCR (and Docker Hub when configured) as
+`1.1.0`, `1.1`, `1` and `latest`, and attaches the `deploy/` bundle with
+`SHA256SUMS` to the GitHub Release. Only tags publish images: pushes to `main`
+are built and tested by CI but never pushed. Mark anything operators must do
 with **Action** in `CHANGELOG.md` before tagging.
 
 ## Rules that are not negotiable

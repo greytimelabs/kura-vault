@@ -223,9 +223,9 @@ Changes are expected to keep all of these true.
     TLS (`POSTGRES_SSL`), the refresh cookie's `Secure` flag (the scheme of
     `PUBLIC_URL`, which must be `https://` outside localhost), and how many
     proxies are trusted for the client address (`TRUST_PROXY`, never `true`).
-20b. Published images are built only by the release workflow, scanned in CI,
-    carry SBOM and provenance attestations, and are signed with cosign
-    (keyless). See [self-hosting](self-hosting.md#verify-the-images).
+20b. Published images are built only by the release workflow, from release
+    tags, and scanned in CI. They are not signed; pin them by digest. See
+    [self-hosting](self-hosting.md#pin-the-images).
 
 **Cryptography**
 

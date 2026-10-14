@@ -12,9 +12,8 @@ upgrading is marked **Action**. The format follows
 ### Added
 
 - Published images, `ghcr.io/greytimelabs/kura-vault-server` and
-  `ghcr.io/greytimelabs/kura-vault-web`, for amd64 and arm64. They are signed
-  with cosign and carry SBOM and provenance attestations. A Docker Hub mirror
-  is published when configured.
+  `ghcr.io/greytimelabs/kura-vault-web`, for amd64 and arm64, published for
+  each release tag. A Docker Hub mirror is published when configured.
 - A `deploy/` bundle attached to each release: Docker Compose file, example
   environment, optional bundled Garage storage served from the server's own
   address, and an installer that verifies checksums and generates secrets.

@@ -8,8 +8,8 @@ seriously. The project has not had an independent security audit.
 Security fixes go into the latest release, which is published as new images.
 Upgrade by changing `KURA_VERSION` (see
 [upgrades](docs/self-hosting.md#upgrades)). Older releases are not patched.
-Before running an image, you can check that this repository's release workflow
-built and signed it: see [verify the images](docs/self-hosting.md#verify-the-images).
+To keep running exactly the image you checked, pin it by digest: see
+[pin the images](docs/self-hosting.md#pin-the-images).
 
 ## Reporting a vulnerability
 
