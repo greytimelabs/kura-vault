@@ -7,6 +7,8 @@ upgrading is marked **Action**. The format follows
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-14
+
 ### Added
 
 - Published images, `ghcr.io/greytimelabs/kura-vault-server` and
@@ -54,3 +56,6 @@ upgrading is marked **Action**. The format follows
 ### Removed
 
 - The unused CloudFront and `S3_PRESIGNED_EXPIRY` settings.
+
+[Unreleased]: https://github.com/greytimelabs/kura-vault/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/greytimelabs/kura-vault/releases/tag/v1.0.0
