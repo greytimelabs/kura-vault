@@ -1,10 +1,12 @@
 # Keeps pinned dependencies current. Base images and actions are pinned by digest
-# or commit, so these updates are the only way they move.
+# or commit, so these updates are the only way they move. PRs are not rebased on
+# every push to main; comment `@dependabot rebase` on one to bring it up to date.
 version: 2
 updates:
   - package-ecosystem: npm
     directories: [/backend, /web, /migration-cli]
     schedule: { interval: weekly }
+    rebase-strategy: disabled
     groups:
       minor-and-patch:
         update-types: [minor, patch]
@@ -13,10 +15,12 @@ updates:
   - package-ecosystem: docker
     directories: [/backend, /web]
     schedule: { interval: weekly }
+    rebase-strategy: disabled
 
   - package-ecosystem: docker-compose
     directories: [/deploy]
     schedule: { interval: weekly }
+    rebase-strategy: disabled
     ignore:
       # A PostgreSQL major upgrade needs a dump and restore; see docs/self-hosting.md
       - dependency-name: postgres
@@ -25,6 +29,7 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+    rebase-strategy: disabled
     groups:
       actions:
         patterns: ['*']
