@@ -1,0 +1,15 @@
+# Cloudflare Pages response headers for a hosted multi-server build, the ones the
+# Docker image's nginx sends itself. The page carries the rest of its policy in a
+# <meta> tag (vite.config.ts), which cannot say frame-ancestors; both are enforced.
+# Copied into dist/ by .github/workflows/deploy-web.yml. Not in public/, so the
+# Docker image does not serve it.
+/*
+  Content-Security-Policy: frame-ancestors 'none'
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Strict-Transport-Security: max-age=31536000
+
+# Hashed build output never changes
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

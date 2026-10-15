@@ -1,0 +1,79 @@
+name: Deploy web client
+
+# Builds the web client in multi-server mode (VITE_MULTI_SERVER=true: the user types
+# a server address, so it can be hosted apart from any server) and deploys it to
+# Cloudflare Pages. A tag v1.2.3 deploys that release, next to the images that
+# release.yml publishes, so the hosted client never runs ahead of the server.
+# Run it by hand from the Actions tab to redeploy.
+#
+# Skipped unless the repository variable CLOUDFLARE_PAGES_PROJECT is set. Needs, in
+# the cloudflare-pages environment: secret CLOUDFLARE_API_TOKEN (Account →
+# Cloudflare Pages → Edit) and variable CLOUDFLARE_ACCOUNT_ID. The project is a
+# Direct Upload project with production branch main. See docs/self-hosting.md.
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
+jobs:
+  pages:
+    if: vars.CLOUDFLARE_PAGES_PROJECT != ''
+    runs-on: ubuntu-24.04
+    environment: cloudflare-pages
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            migration-cli/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      # The type check and the crypto tests reach into the import CLI's encryptor
+      - run: pnpm install --frozen-lockfile
+        working-directory: migration-cli
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      - name: Build
+        env:
+          VITE_MULTI_SERVER: 'true'
+        run: |
+          pnpm exec vite build
+          cp cloudflare/_headers dist/
+
+      # Pages adds no headers of its own: without these the page would go out unprotected
+      - name: Check the build carries its security policy
+        run: |
+          grep -q 'http-equiv="Content-Security-Policy"' dist/index.html || { echo "::error::dist/index.html has no CSP meta tag"; exit 1; }
+          grep -q "frame-ancestors 'none'" dist/_headers || { echo "::error::dist/_headers is missing"; exit 1; }
+
+      - name: Deploy to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+        run: |
+          pnpm dlx wrangler@4.145.0 pages deploy dist \
+            --project-name="$PROJECT" \
+            --branch=main \
+            --commit-hash="$GITHUB_SHA" \
+            --commit-message="$GITHUB_REF_NAME"

@@ -11,6 +11,7 @@ For running from source (development), see [getting started](getting-started.md)
 - [Create the owner account](#create-the-owner-account)
 - [Storage](#storage)
 - [Configuration](#configuration)
+- [Host the web client separately](#host-the-web-client-separately)
 - [Backups](#backups)
 - [Upgrades](#upgrades)
 - [Pin the images](#pin-the-images)
@@ -266,6 +267,63 @@ of one variable is an error.
 The server checks its configuration at start and refuses to run with a clear
 message if something is wrong. A plain `http://` `PUBLIC_URL` is one example.
 See `docker compose logs server`.
+
+## Host the web client separately
+
+The `web` container serves the client from the server's own address. You can
+instead host the client on its own address, such as a static host, and run
+only the API and the database.
+
+**Build it in multi-server mode.** The client then asks for a server address,
+and invite links name that server instead of the page's address:
+
+```bash
+cd web
+pnpm install --frozen-lockfile
+VITE_MULTI_SERVER=true pnpm exec vite build     # output in dist/
+```
+
+The build carries its Content-Security-Policy in a `<meta>` tag, which allows
+connections to any `https:` origin. Leave `VITE_S3_ORIGIN` unset. If you set it,
+it replaces `https:`, so list the API's origin in it as well as the bucket's.
+A `<meta>` policy cannot forbid framing, so have the host send the headers in
+[`web/cloudflare/_headers`](../web/cloudflare/_headers) (Cloudflare Pages and
+Netlify read that file from the output directory).
+
+**Allow the client's origin** in `CORS_ORIGINS` on the server, and in the
+bucket's CORS rule (see [Storage](#storage)). The bundled Garage is served from
+the web container, so a separately hosted client needs your own bucket.
+
+**Without the `web` container,** publish the API to your proxy instead, in
+`docker-compose.override.yml` next to `docker-compose.yml`:
+
+```yaml
+services:
+  web:
+    profiles: [disabled]          # never started
+  server:
+    ports:
+      - "127.0.0.1:3000:3000"
+```
+
+Point the proxy for `PUBLIC_URL` at `127.0.0.1:3000`. The server trusts exactly
+one proxy hop, now your proxy, for client addresses. Users open the client and
+enter `PUBLIC_URL` as the server.
+
+### Cloudflare Pages from this repository
+
+[`.github/workflows/deploy-web.yml`](../.github/workflows/deploy-web.yml) runs
+the client's checks, builds it as above and deploys it to Cloudflare Pages for
+each release tag, or when run by hand. It does nothing until it is configured:
+
+1. Create a Direct Upload project:
+   `npx wrangler pages project create <name> --production-branch main`. Add
+   your custom domain to it.
+2. Create a Cloudflare API token with **Account → Cloudflare Pages → Edit**.
+3. In the GitHub repository, add an environment `cloudflare-pages` that only
+   `main` and `v*.*.*` tags may deploy to, holding the secret
+   `CLOUDFLARE_API_TOKEN`. Add the variables `CLOUDFLARE_ACCOUNT_ID` and
+   `CLOUDFLARE_PAGES_PROJECT` (the project's name).
 
 ## Backups
 

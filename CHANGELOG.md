@@ -7,6 +7,13 @@ upgrading is marked **Action**. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A workflow that deploys the web client, built in multi-server mode, to
+  Cloudflare Pages for each release tag. It runs only when configured.
+- Documentation for hosting the web client apart from the server, and for
+  running the server without the `web` container.
+
 ## [1.0.1] - 2026-10-14
 
 ## [1.0.0] - 2026-10-14
