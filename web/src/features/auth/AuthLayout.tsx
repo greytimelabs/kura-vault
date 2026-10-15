@@ -1,5 +1,5 @@
-import { LockKeyhole } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { KuraMark } from '@/components/brand/KuraMark';
 
 /** Centered card used by the sign-in, register and unlock screens. */
 export function AuthLayout({ title, subtitle, children, footer }: { title: string; subtitle?: string; children: ReactNode; footer?: ReactNode }) {
@@ -8,7 +8,7 @@ export function AuthLayout({ title, subtitle, children, footer }: { title: strin
       <div className="w-full max-w-sm">
         <div className="mb-7 text-center">
           <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl bg-accent text-accent-ink">
-            <LockKeyhole className="size-7" aria-hidden />
+            <KuraMark className="size-8" />
           </div>
           <h1 className="text-2xl font-semibold tracking-tight text-ink">{title}</h1>
           {subtitle && <p className="mt-1.5 text-sm text-muted">{subtitle}</p>}

@@ -8,6 +8,7 @@ import '../../../../blocs/auth/auth_cubit.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../users/data/users_api.dart';
 import '../widgets/account_switcher_sheet.dart';
+import '../../../../core/widgets/kura_mark.dart';
 import '../widgets/create_vault_dialog.dart';
 import '../widgets/vault_picker_sheet.dart';
 
@@ -171,7 +172,7 @@ class _PassphraseScreenState extends State<PassphraseScreen> {
           padding: const EdgeInsets.all(32),
           children: [
             const SizedBox(height: 24),
-            const Icon(Icons.lock_open_outlined, size: 64, color: Colors.blueGrey),
+            const KuraBadge(size: 64),
             const SizedBox(height: 24),
             const Text(
               'Open a vault',

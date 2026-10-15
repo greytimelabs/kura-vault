@@ -1,0 +1,28 @@
+# App icons for every platform, from the files in ../branding/export.
+# Regenerate with: dart run flutter_launcher_icons
+flutter_launcher_icons:
+  image_path: "../branding/export/app-icon-1024.png"
+
+  android: "ic_launcher"
+  min_sdk_android: 21
+  adaptive_icon_background: "#233A5E"
+  adaptive_icon_foreground: "../branding/export/adaptive-foreground-1024.png"
+  # The foreground is already drawn inside the 66dp safe zone
+  adaptive_icon_foreground_inset: 0
+  adaptive_icon_monochrome: "../branding/export/adaptive-monochrome-1024.png"
+
+  ios: true
+  remove_alpha_ios: true
+
+  web:
+    generate: true
+    background_color: "#233A5E"
+    theme_color: "#233A5E"
+
+  windows:
+    generate: true
+    icon_size: 256
+
+  macos:
+    generate: true
+    image_path: "../branding/export/macos-icon-1024.png"

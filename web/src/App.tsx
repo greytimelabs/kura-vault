@@ -10,6 +10,8 @@ import { JoinPage } from '@/features/auth/JoinPage';
 import { LoginPage } from '@/features/auth/LoginPage';
 import { ServerPage } from '@/features/auth/ServerPage';
 import { SetupPage } from '@/features/auth/SetupPage';
+import { DeleteAccountPage } from '@/features/legal/DeleteAccountPage';
+import { PrivacyPage } from '@/features/legal/PrivacyPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { AppShell } from '@/features/shell/AppShell';
 import { useAutoLock } from '@/features/shell/useAutoLock';
@@ -135,6 +137,9 @@ export function App() {
             </Route>
             {/* An invite link works whoever is or is not signed in on this browser */}
             <Route path="/join" element={<JoinPage />} />
+            {/* Greytimelabs' policies, linked from the store listings. Only the hosted client is theirs to speak for. */}
+            {MULTI_SERVER && <Route path="/privacy" element={<PrivacyPage />} />}
+            {MULTI_SERVER && <Route path="/delete-account" element={<DeleteAccountPage />} />}
             <Route element={<RequireAuth />}>
               <Route path="/unlock" element={<UnlockRoute />} />
               <Route element={<OwnerOnly />}>

@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../blocs/auth/auth_cubit.dart';
 import '../../../../blocs/auth/auth_state.dart';
+import '../../../../core/widgets/kura_mark.dart';
 import '../widgets/account_switcher_sheet.dart';
 
 /// Second step of signing in: username + password on [serverUrl].
@@ -93,7 +94,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Icon(Icons.lock_outline, size: 64, color: Colors.blueGrey),
+                    const KuraBadge(size: 64),
                     const SizedBox(height: 16),
                     Text(
                       'Kura Vault',

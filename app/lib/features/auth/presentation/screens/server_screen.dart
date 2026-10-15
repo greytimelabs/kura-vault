@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../blocs/auth/auth_cubit.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/server/server_url.dart';
+import '../../../../core/widgets/kura_mark.dart';
 import '../widgets/account_switcher_sheet.dart';
 
 /// First step of signing in: which server to talk to.
@@ -121,7 +122,7 @@ class _ServerScreenState extends State<ServerScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(Icons.lock_outline, size: 64, color: Colors.blueGrey),
+                const KuraBadge(size: 64),
                 const SizedBox(height: 16),
                 Text(
                   'Kura Vault',

@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="branding/logo-lockup-light.svg">
+    <img src="branding/logo-lockup.svg" alt="Kura Vault" width="360">
+  </picture>
+</p>
+
 # Kura Vault
 
 Self-hosted, end-to-end encrypted storage for personal photos and videos.

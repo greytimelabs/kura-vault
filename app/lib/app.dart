@@ -18,6 +18,7 @@ import 'core/storage/secure_storage_service.dart';
 import 'core/storage/cache_service.dart';
 import 'core/storage/preferences.dart';
 import 'core/storage/temp_files.dart';
+import 'core/theme/brand.dart';
 import 'routing/app_router.dart';
 
 class KuraVaultApp extends StatefulWidget {
@@ -218,16 +219,8 @@ class _KuraVaultAppState extends State<KuraVaultApp>
         builder: (context, preferences) => MaterialApp.router(
           title: 'Kura Vault',
           debugShowCheckedModeBanner: false,
-          theme: ThemeData(
-            colorSchemeSeed: Colors.blueGrey,
-            useMaterial3: true,
-            brightness: Brightness.light,
-          ),
-          darkTheme: ThemeData(
-            colorSchemeSeed: Colors.blueGrey,
-            useMaterial3: true,
-            brightness: Brightness.dark,
-          ),
+          theme: kuraTheme(Brightness.light),
+          darkTheme: kuraTheme(Brightness.dark),
           themeMode: preferences.theme,
           routerConfig: _router,
         ),

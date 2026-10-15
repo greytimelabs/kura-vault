@@ -1,11 +1,12 @@
 import { clsx } from 'clsx';
-import { Images, Lock, LockKeyhole, LogOut, Settings, SquareLibrary } from 'lucide-react';
+import { Images, Lock, LogOut, Settings, SquareLibrary } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { AccountMenu } from './AccountMenu';
 import { ScrollContext } from './ScrollContext';
 import { UploadButton, UploadDropzone } from '../upload/UploadControls';
 import { UploadPanel } from '../upload/UploadPanel';
+import { KuraMark } from '@/components/brand/KuraMark';
 import { IconButton } from '@/components/ui/IconButton';
 import { MULTI_SERVER } from '@/lib/config';
 import { closeVault, lockVault } from '@/lib/session';
@@ -47,7 +48,7 @@ export function AppShell() {
       >
         <div className="mb-6 flex h-10 items-center gap-3 px-2">
           <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-ink">
-            <LockKeyhole className="size-[18px]" aria-hidden />
+            <KuraMark className="size-[18px]" />
           </span>
           <span className="hidden text-[17px] font-semibold tracking-tight lg:block">Kura Vault</span>
         </div>

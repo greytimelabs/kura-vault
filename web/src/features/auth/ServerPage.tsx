@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AuthLayout } from './AuthLayout';
 import { AccountMenu } from '../shell/AccountMenu';
 import { Button } from '@/components/ui/Button';
@@ -41,11 +41,16 @@ export function ServerPage() {
       title={adding ? 'Add account' : 'Kura Vault'}
       subtitle="Enter the address of your Kura Vault server"
       footer={
-        hasAccounts ? (
-          <div className="flex items-center justify-center gap-2">
-            Saved accounts <AccountMenu />
-          </div>
-        ) : undefined
+        <div className="space-y-3">
+          {hasAccounts && (
+            <div className="flex items-center justify-center gap-2">
+              Saved accounts <AccountMenu />
+            </div>
+          )}
+          <Link to="/privacy" className="hover:text-ink">
+            Privacy policy
+          </Link>
+        </div>
       }
     >
       <form onSubmit={submit} noValidate className="space-y-4">

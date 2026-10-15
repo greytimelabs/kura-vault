@@ -1,0 +1,17 @@
+# Launch screen: the mark on plaster, or on indigo in dark mode.
+# Regenerate with: dart run flutter_native_splash:create
+flutter_native_splash:
+  color: "#F2ECE1"
+  image: ../branding/export/splash-light.png
+  color_dark: "#233A5E"
+  image_dark: ../branding/export/splash-dark.png
+
+  android_12:
+    color: "#F2ECE1"
+    image: ../branding/export/splash-light.png
+    color_dark: "#233A5E"
+    image_dark: ../branding/export/splash-dark.png
+
+  android: true
+  ios: true
+  web: false

@@ -7,6 +7,7 @@ import '../../../../blocs/vault/vault_cubit.dart';
 import '../../../../core/crypto/crypto_service.dart';
 import '../../../../core/platform/biometric_channel.dart';
 import '../../../../core/security/biometric_unlock.dart';
+import '../../../../core/widgets/kura_mark.dart';
 import '../widgets/account_switcher_sheet.dart';
 
 /// The master passphrase. It decrypts the account's private keys on this
@@ -167,11 +168,7 @@ class _UnlockScreenState extends State<UnlockScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(
-                  Icons.lock_outline,
-                  size: 64,
-                  color: Colors.blueGrey,
-                ),
+                const KuraBadge(size: 64),
                 const SizedBox(height: 24),
                 const Text(
                   'Unlock',
