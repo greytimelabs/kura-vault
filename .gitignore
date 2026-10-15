@@ -54,6 +54,8 @@ tmp/
 !.vscode/extensions.json
 !.vscode/launch.json
 *.swp
+# Wrangler's local cache, from deploying the web client to Cloudflare Pages
+.wrangler/
 
 # ── OS ────────────────────────────────────────────────────────────
 .DS_Store
