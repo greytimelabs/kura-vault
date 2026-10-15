@@ -7,6 +7,8 @@ upgrading is marked **Action**. The format follows
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-15
+
 ### Added
 
 - A workflow that deploys the web client, built in multi-server mode, to
@@ -65,6 +67,7 @@ upgrading is marked **Action**. The format follows
 
 - The unused CloudFront and `S3_PRESIGNED_EXPIRY` settings.
 
-[Unreleased]: https://github.com/greytimelabs/kura-vault/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/greytimelabs/kura-vault/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/greytimelabs/kura-vault/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/greytimelabs/kura-vault/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/greytimelabs/kura-vault/releases/tag/v1.0.0
