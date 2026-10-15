@@ -22,9 +22,14 @@ class AuthCubit extends Cubit<AuthState> {
     _apiClient.onSessionExpired = (_) => _sync();
   }
 
-  /// Read the saved accounts.
+  /// Read the saved accounts. Whatever happens, the app leaves the launch
+  /// screen: storage that fails or never answers counts as no saved accounts.
   Future<void> init() async {
-    await _accounts.load();
+    try {
+      await _accounts.load().timeout(const Duration(seconds: 10));
+    } catch (_) {
+      // Signed out is the safe fallback
+    }
     _sync();
   }
 

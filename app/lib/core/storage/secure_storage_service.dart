@@ -16,7 +16,13 @@ class SecureStorageService {
 
   SecureStorageService()
       : _storage = const FlutterSecureStorage(
-          aOptions: AndroidOptions(encryptedSharedPreferences: true),
+          // Storage the keystore can no longer decrypt (a reinstall, a wiped
+          // or replaced keystore key) is cleared instead of failing every
+          // read: the user signs in again rather than the app never starting
+          aOptions: AndroidOptions(
+            encryptedSharedPreferences: true,
+            resetOnError: true,
+          ),
           iOptions: _deviceOnly,
         );
 

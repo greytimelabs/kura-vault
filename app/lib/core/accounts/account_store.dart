@@ -29,7 +29,11 @@ class AccountStore {
   Future<void> load() async {
     // Builds before multi-account kept one global session under these keys.
     for (final key in AppConstants.legacySessionKeys) {
-      await _storage.delete(key);
+      try {
+        await _storage.delete(key);
+      } catch (_) {
+        // Best-effort cleanup; it must not stop the app from starting
+      }
     }
 
     final raw = await _storage.read(AppConstants.keyAccounts);
