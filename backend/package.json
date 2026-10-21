@@ -61,7 +61,7 @@
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
-    "@types/node": "^25.5.2",
+    "@types/node": "^26.6.5",
     "@types/passport-jwt": "^4.0.1",
     "@types/uuid": "^11.0.0",
     "jest": "^30.3.0",
