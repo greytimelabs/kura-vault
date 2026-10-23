@@ -123,13 +123,13 @@ if ! docker compose up -d --wait --wait-timeout 300; then
   fail "the services did not become healthy (logs above). Going back after a migration needs the database dump: see docs/self-hosting.md, Upgrades. Backup: $(pwd)/$backup"
 fi
 
-bind=$(sed -n 's/^HTTP_BIND=//p' .env | tail -n 1)
-port=$(sed -n 's/^HTTP_PORT=//p' .env | tail -n 1)
-case "${bind:-}" in "" | 0.0.0.0) bind=127.0.0.1 ;; esac
-if curl -fsS -o /dev/null "http://$bind:${port:-8080}/api/v1/health"; then
+# Asked inside the server container, as its own healthcheck does: this works
+# whatever ports the override publishes, with or without the web container
+health="fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/v1/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+if docker compose exec -T server node -e "$health"; then
   say "Health check passed."
 else
-  fail "the health check on http://$bind:${port:-8080}/api/v1/health failed; see docker compose logs server. Backup: $(pwd)/$backup"
+  fail "the server's /api/v1/health check failed; see docker compose logs server. Backup: $(pwd)/$backup"
 fi
 
 say ""
