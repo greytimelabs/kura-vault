@@ -191,10 +191,10 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           mkdir -p dist
-          cp deploy/docker-compose.yml deploy/garage.toml deploy/install.sh dist/
+          cp deploy/docker-compose.yml deploy/garage.toml deploy/install.sh deploy/upgrade.sh dist/
           # The bundle names its own release, so a download is pinned from the start
           sed "s|^KURA_VERSION=.*|KURA_VERSION=$version|" deploy/example.env > dist/example.env
-          (cd dist && sha256sum docker-compose.yml example.env garage.toml install.sh > SHA256SUMS)
+          (cd dist && sha256sum docker-compose.yml example.env garage.toml install.sh upgrade.sh > SHA256SUMS)
           cat dist/SHA256SUMS
       - name: Attach to the GitHub Release
         env:

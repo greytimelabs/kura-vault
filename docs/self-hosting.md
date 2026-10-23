@@ -368,7 +368,25 @@ forgotten their passphrase: restoring cannot bring back access.
 
 ## Upgrades
 
-Read the release notes first: they call out anything you need to do. Then:
+Read the release notes first: they call out anything you need to do. Then, in
+the deployment directory:
+
+```bash
+curl -fsSLO https://github.com/greytimelabs/kura-vault/releases/latest/download/upgrade.sh
+less upgrade.sh        # read it first
+sh upgrade.sh 1.3.0    # the new release
+```
+
+The script downloads that release's files and checks them against its
+`SHA256SUMS`, stopping with nothing changed on a mismatch. It then backs up the
+database, `.env` and the current files into `backups/`, puts the new files in
+place, sets `KURA_VERSION`, pulls the images, restarts and checks
+`/api/v1/health`. It keeps `.env` and `docker-compose.override.yml`, and asks
+before replacing a `garage.toml` that differs from the release's. Run it as a
+user that can use Docker (with `sudo` if needed), or from elsewhere with
+`KURA_DIR=/path/to/kura-vault`.
+
+By hand, the same steps are:
 
 ```bash
 docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' > before-upgrade.dump
