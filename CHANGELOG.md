@@ -7,6 +7,8 @@ upgrading is marked **Action**. The format follows
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-10-23
+
 ## [1.0.5] - 2026-10-15
 
 ## [1.0.4] - 2026-10-15
@@ -73,7 +75,8 @@ upgrading is marked **Action**. The format follows
 
 - The unused CloudFront and `S3_PRESIGNED_EXPIRY` settings.
 
-[Unreleased]: https://github.com/greytimelabs/kura-vault/compare/v1.0.5...HEAD
+[Unreleased]: https://github.com/greytimelabs/kura-vault/compare/v1.0.6...HEAD
+[1.0.6]: https://github.com/greytimelabs/kura-vault/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/greytimelabs/kura-vault/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/greytimelabs/kura-vault/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/greytimelabs/kura-vault/compare/v1.0.2...v1.0.3
