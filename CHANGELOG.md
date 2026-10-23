@@ -7,6 +7,12 @@ upgrading is marked **Action**. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `upgrade.sh`, published with each release next to `install.sh`: it moves a
+  deployment to another release, checking the files against `SHA256SUMS` and
+  backing up the database and `.env` before it changes anything.
+
 ## [1.0.6] - 2026-10-23
 
 ## [1.0.5] - 2026-10-15

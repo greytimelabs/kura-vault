@@ -166,4 +166,4 @@ jobs:
         with:
           persist-credentials: false
       - name: shellcheck
-        run: shellcheck -s sh deploy/install.sh web/docker-entrypoint.d/40-kura-config.sh scripts/release.sh
+        run: shellcheck -s sh deploy/install.sh deploy/upgrade.sh web/docker-entrypoint.d/40-kura-config.sh scripts/release.sh
