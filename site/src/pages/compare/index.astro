@@ -1,0 +1,42 @@
+---
+import CompareTable from '../../components/CompareTable.astro';
+import Icon from '../../components/Icon.astro';
+import Article from '../../layouts/Article.astro';
+import { CHECKED, COMPARISONS } from '../../data/compare';
+---
+
+<Article
+  title="Kura Vault compared with Immich, Ente and Google Photos"
+  description="Honest comparisons of Kura Vault with Immich, Ente, Google Photos, iCloud, PhotoPrism and Nextcloud, including where they are the better pick."
+  og="compare"
+  eyebrow="Compare"
+  heading="How Kura Vault compares"
+  lede="Every photo app makes trade-offs. Kura Vault gives up server-side features like face recognition so that the server never sees your photos. These pages say plainly when another app is the better fit."
+  updated={CHECKED}
+  trail={[{ name: 'Compare', path: '/compare' }]}
+>
+  <p>
+    Claims about other products link to their own documentation and were checked on {CHECKED}. If something has
+    changed, please <a href="https://github.com/greytimelabs/kura-vault/issues">open an issue</a> and we will correct it.
+  </p>
+  <div slot="after" class="mt-12">
+    <ul class="grid gap-4 sm:grid-cols-2">
+      {
+        COMPARISONS.map((c) => (
+          <li>
+            <a href={`/compare/${c.slug}`} class="group flex h-full flex-col rounded-2xl border border-line bg-surface p-6 transition-colors hover:border-accent">
+              <span class="eyebrow">Kura Vault vs</span>
+              <span class="mt-2 font-serif text-2xl">{c.name}</span>
+              <span class="mt-3 text-[15px] leading-relaxed text-muted">{c.description}</span>
+              <span class="mt-auto inline-flex items-center gap-1.5 pt-5 text-sm font-semibold text-accent">
+                Read the comparison <Icon name="arrow" class="size-4 transition-transform group-hover:translate-x-0.5" />
+              </span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+    <h2 class="mt-16 mb-6 text-3xl">At a glance</h2>
+    <CompareTable />
+  </div>
+</Article>

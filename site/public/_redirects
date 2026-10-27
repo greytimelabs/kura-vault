@@ -1,0 +1,13 @@
+# The web client lived here until it moved to kura-app.greytimelabs.com. Send its
+# paths there, so old bookmarks and invite links keep working. Browsers keep an
+# invite link's #fragment, which holds its secret, across the redirect.
+/join            https://kura-app.greytimelabs.com/join            301
+/server          https://kura-app.greytimelabs.com/server          301
+/login           https://kura-app.greytimelabs.com/login           301
+/setup           https://kura-app.greytimelabs.com/setup           301
+/unlock          https://kura-app.greytimelabs.com/unlock          301
+/timeline        https://kura-app.greytimelabs.com/timeline        301
+/albums          https://kura-app.greytimelabs.com/albums          301
+/albums/*        https://kura-app.greytimelabs.com/albums/:splat   301
+/settings        https://kura-app.greytimelabs.com/settings        301
+/users           https://kura-app.greytimelabs.com/users           301

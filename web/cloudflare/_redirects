@@ -1,0 +1,5 @@
+# Cloudflare Pages redirects for the hosted multi-server build at
+# kura-app.greytimelabs.com. The policies moved to the website with the client's
+# old address. Copied into dist/ by .github/workflows/deploy-web.yml.
+/privacy          https://kura.greytimelabs.com/privacy          301
+/delete-account   https://kura.greytimelabs.com/delete-account   301

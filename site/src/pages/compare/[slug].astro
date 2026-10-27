@@ -1,0 +1,97 @@
+---
+import Icon from '../../components/Icon.astro';
+import MarkCell from '../../components/MarkCell.astro';
+import Article from '../../layouts/Article.astro';
+import { CHECKED, CHECKED_ISO, COMPARISONS, type Comparison } from '../../data/compare';
+import { article } from '../../data/schema';
+import { REPO_URL } from '../../data/site';
+
+export function getStaticPaths() {
+  return COMPARISONS.map((c) => ({ params: { slug: c.slug }, props: { c } }));
+}
+
+const { c } = Astro.props as { c: Comparison };
+const path = `/compare/${c.slug}`;
+const others = COMPARISONS.filter((o) => o.slug !== c.slug);
+---
+
+<Article
+  title={c.title}
+  description={c.description}
+  og={`compare-${c.slug}`}
+  eyebrow="Compare"
+  heading={`Kura Vault vs ${c.name}`}
+  lede={c.summary}
+  updated={CHECKED}
+  trail={[
+    { name: 'Compare', path: '/compare' },
+    { name: c.name, path },
+  ]}
+  schema={[article({ headline: c.title, description: c.description, path, modified: CHECKED_ISO })]}
+>
+  <h2>Side by side</h2>
+  <div class="table-scroll">
+    <table class="min-w-[36rem]">
+      <thead>
+        <tr>
+          <th scope="col" class="w-[28%]"><span class="sr-only">Feature</span></th>
+          <th scope="col">Kura Vault</th>
+          <th scope="col">{c.name}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          c.rows.map((r) => (
+            <tr>
+              <th scope="row">{r.label}</th>
+              <td><MarkCell cell={r.kura} /></td>
+              <td><MarkCell cell={r.them} /></td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Choose {c.name} if</h2>
+  <ul>{c.chooseThem.map((item) => <li>{item}</li>)}</ul>
+
+  <h2>Choose Kura Vault if</h2>
+  <ul>{c.chooseKura.map((item) => <li>{item}</li>)}</ul>
+
+  <h2>What Kura Vault does not do yet</h2>
+  <ul>
+    <li>There is no face recognition, object search or map. The server cannot see photos to index them.</li>
+    <li>The Android app uploads while it is open; there is no automatic background backup.</li>
+    <li>There is no iOS app in the App Store yet, and no desktop app. The web client works in any current browser.</li>
+    <li>It has not had an independent security audit yet.</li>
+  </ul>
+
+  <h2>Sources</h2>
+  <p>Checked on {CHECKED}. If something here is out of date, please <a href={`${REPO_URL}/issues`}>open an issue</a>.</p>
+  <ul>
+    {
+      c.sources.map((s) => (
+        <li>
+          <a href={s.url}>{s.label}</a>
+        </li>
+      ))
+    }
+    <li><a href="/security">Kura Vault security model</a></li>
+  </ul>
+
+  <div slot="after" class="mt-16 max-w-3xl border-t border-line pt-10">
+    <h2 class="text-2xl">Other comparisons</h2>
+    <ul class="mt-5 grid gap-3 sm:grid-cols-3">
+      {
+        others.map((o) => (
+          <li>
+            <a href={`/compare/${o.slug}`} class="flex items-center justify-between gap-2 rounded-xl border border-line bg-surface px-4 py-3 text-[15px] hover:border-accent">
+              {o.name} <Icon name="arrow" class="size-4 shrink-0 text-muted" />
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</Article>

@@ -1,0 +1,54 @@
+---
+// The three places data lives, and what each one can read. Mirrors docs/crypto/README.md.
+import Icon from './Icon.astro';
+
+const steps = [
+  {
+    icon: 'devices',
+    where: 'Your device',
+    title: 'Encrypted before it leaves',
+    body: 'Each photo or video gets its own random key and is encrypted with AES-256-GCM, along with its file name, location and other metadata. The key is wrapped by the vault key, which is sealed under keys derived from your passphrase with Argon2id.',
+    detail: ['IMG_2210.HEIC', '→ 3f9a c2e1 77b0 …'],
+  },
+  {
+    icon: 'server',
+    where: 'Your server',
+    title: 'Stores what it cannot read',
+    body: 'PostgreSQL holds wrapped keys, salts, public keys and the metadata needed to sort and authorise. The bucket holds opaque blobs. Uploads and downloads go straight to the bucket with short-lived pre-signed URLs.',
+    detail: ['media/8c1e…/original', 'application/octet-stream'],
+  },
+  {
+    icon: 'key',
+    where: 'Your devices and people you share with',
+    title: 'Decrypted only where a key is',
+    body: 'Your other devices unlock with your passphrase. Someone you share with receives the vault or album key sealed to their public key and signed by you. Nothing is re-encrypted and no passphrase is shared.',
+    detail: ['Seal(X25519, vault key)', 'signed with Ed25519'],
+  },
+] as const;
+---
+
+<ol class="relative grid gap-5 lg:grid-cols-3 lg:gap-6">
+  {
+    steps.map((step, i) => (
+      <li class="relative flex flex-col rounded-2xl border border-line bg-surface p-6">
+        <div class="flex items-center gap-3">
+          <span class="flex size-10 items-center justify-center rounded-full bg-accent-soft text-accent">
+            <Icon name={step.icon} class="size-5" />
+          </span>
+          <span class="eyebrow">
+            {i + 1} &middot; {step.where}
+          </span>
+        </div>
+        <h3 class="mt-5 text-xl">{step.title}</h3>
+        <p class="mt-2.5 text-[15px] leading-relaxed text-muted">{step.body}</p>
+        <div class="mt-auto pt-5">
+          <div class="rounded-lg bg-code-bg px-3.5 py-2.5 font-mono text-[11.5px] leading-relaxed text-code-ink">
+            {step.detail.map((line) => (
+              <div class="truncate">{line}</div>
+            ))}
+          </div>
+        </div>
+      </li>
+    ))
+  }
+</ol>

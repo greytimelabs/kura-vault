@@ -1,0 +1,76 @@
+---
+// The web client's timeline in a browser window, with the phone app's unlock
+// screen in front. Drawn, not photographed: swap for real screenshots before
+// launch (see site/README.md). Tile colours stand in for photos.
+import KuraMark from '../KuraMark.astro';
+
+const tiles = [
+  'from-[#d9b98f] to-[#8a6340]',
+  'from-[#9db7c9] to-[#3f5d78]',
+  'from-[#c8d3b0] to-[#6d7f4f]',
+  'from-[#e8c4b3] to-[#a8664f]',
+  'from-[#b9b2d6] to-[#5b5089]',
+  'from-[#f0dcae] to-[#b88a3a]',
+  'from-[#a9c9c0] to-[#3f7466]',
+  'from-[#d6c2d9] to-[#7b5a80]',
+  'from-[#c3ccd9] to-[#56657d]',
+  'from-[#e3cfb4] to-[#8f7351]',
+  'from-[#b4cfe0] to-[#4b7894]',
+  'from-[#d9d0c1] to-[#7d7061]',
+];
+---
+
+<div class="relative mx-auto w-full max-w-[40rem]" role="img" aria-label="The Kura Vault web client showing a photo timeline, and the Android app asking for a vault passphrase">
+  <!-- Browser window -->
+  <div class="overflow-hidden rounded-xl border border-line bg-surface shadow-[0_30px_60px_-30px_rgb(20_26_36/0.35)]">
+    <div class="flex items-center gap-2 border-b border-line px-3.5 py-2.5">
+      <span class="size-2.5 rounded-full bg-line"></span>
+      <span class="size-2.5 rounded-full bg-line"></span>
+      <span class="size-2.5 rounded-full bg-line"></span>
+      <span class="ml-3 truncate rounded-md bg-bg px-3 py-1 font-mono text-[10px] text-muted">vault.example.com/timeline</span>
+    </div>
+    <div class="flex">
+      <div class="hidden w-36 shrink-0 border-r border-line p-3 sm:block">
+        <div class="mb-4 flex items-center gap-1.5 text-[11px] font-semibold">
+          <span class="flex size-5 items-center justify-center rounded bg-accent text-accent-ink"><KuraMark class="size-3" /></span>
+          Kura Vault
+        </div>
+        <div class="space-y-1 text-[10.5px] text-muted">
+          <div class="rounded-md bg-accent-soft px-2 py-1.5 font-medium text-ink">Timeline</div>
+          <div class="px-2 py-1.5">Albums</div>
+          <div class="px-2 py-1.5">Settings</div>
+        </div>
+        <div class="mt-6 rounded-md border border-line px-2 py-1.5 text-[10px] text-muted">
+          <div class="font-medium text-ink">Family</div>
+          vault unlocked
+        </div>
+      </div>
+      <div class="min-w-0 flex-1 p-3">
+        <div class="mb-2 flex items-baseline justify-between">
+          <span class="text-[11px] font-semibold">October 2026</span>
+          <span class="text-[9.5px] text-muted">48 items</span>
+        </div>
+        <div class="grid grid-cols-4 gap-1">
+          {tiles.map((t, i) => <div class={`aspect-square rounded-[3px] bg-gradient-to-br ${t} ${i === 5 ? 'opacity-60' : ''}`} />)}
+        </div>
+        <div class="mt-2.5 flex items-center gap-2 rounded-md border border-line bg-bg px-2.5 py-1.5 text-[9.5px] text-muted">
+          <span class="size-1.5 shrink-0 rounded-full bg-accent"></span>
+          <span class="truncate">Encrypting IMG_2210.HEIC on this device, then uploading</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phone -->
+  <div class="absolute -right-2 -bottom-10 w-[34%] max-w-[11rem] min-w-[8.5rem] rounded-[1.6rem] border-[5px] border-ink bg-surface p-3 shadow-[0_30px_50px_-20px_rgb(20_26_36/0.45)] sm:-right-8">
+    <div class="mx-auto mb-4 h-1 w-8 rounded-full bg-line"></div>
+    <div class="mx-auto mb-3 flex size-9 items-center justify-center rounded-xl bg-accent text-accent-ink">
+      <KuraMark class="size-5" />
+    </div>
+    <div class="text-center text-[11px] font-semibold">Unlock a vault</div>
+    <div class="mt-1 text-center text-[8.5px] leading-snug text-muted">Only vaults this passphrase opens are shown</div>
+    <div class="mt-3 rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[9px] tracking-[0.2em] text-muted">••••••••••</div>
+    <div class="mt-2 rounded-md bg-accent py-1.5 text-center text-[9.5px] font-semibold text-accent-ink">Unlock</div>
+    <div class="mt-3 text-center text-[8px] text-muted">Keys stay in memory only</div>
+  </div>
+</div>

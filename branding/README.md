@@ -58,8 +58,8 @@ It is converted to outlines in the SVGs, so no font file ships with them.
 ## Regenerating
 
 The mark is defined once, as geometry on a 1024 grid, in `tools/mark.mjs`.
-`tools/build.mjs` draws every SVG and PNG here from it, and also writes the web
-client's `favicon.svg` and `apple-touch-icon.png`.
+`tools/build.mjs` draws every SVG and PNG here from it, and also writes the
+`favicon.svg` and `apple-touch-icon.png` of the web client and the website.
 
 1. Download [Inter 4.0](https://github.com/rsms/inter/releases/tag/v4.0) and
    copy `Inter-SemiBold.otf` and `Inter-Medium.otf` from `extras/otf/` into
@@ -70,8 +70,9 @@ client's `favicon.svg` and `apple-touch-icon.png`.
    `dart run flutter_native_splash:create`.
 
 The web client draws the mark inline in `web/src/components/brand/KuraMark.tsx`,
-and the app draws it in `app/lib/core/widgets/kura_mark.dart`. If you change
-the geometry, update both.
+the website in `site/src/components/KuraMark.astro`, and the app in
+`app/lib/core/widgets/kura_mark.dart`. If you change the geometry, update all
+three, and run `pnpm og` in `site/` to redraw the link-preview cards.
 
 ## Licence
 

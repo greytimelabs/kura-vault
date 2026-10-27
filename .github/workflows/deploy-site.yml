@@ -1,0 +1,78 @@
+name: Deploy website
+
+# Builds the marketing site in site/ and deploys it to Cloudflare Pages, for
+# kura.greytimelabs.com. Runs on every push to main that touches the site or
+# what it is built from, and by hand from the Actions tab. Unlike the web
+# client, the site is not tied to a release, so a copy fix ships at once.
+#
+# Skipped unless the repository variable CLOUDFLARE_SITE_PAGES_PROJECT is set.
+# Uses the cloudflare-pages environment of deploy-web.yml (secret
+# CLOUDFLARE_API_TOKEN, variable CLOUDFLARE_ACCOUNT_ID). The optional variable
+# CF_BEACON_TOKEN turns on Cloudflare Web Analytics. See docs/self-hosting.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'branding/**'
+      - 'web/package.json'
+      - '.github/workflows/deploy-site.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: false
+
+jobs:
+  pages:
+    if: vars.CLOUDFLARE_SITE_PAGES_PROJECT != ''
+    runs-on: ubuntu-24.04
+    environment: cloudflare-pages
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: site/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+
+      - name: Build
+        env:
+          PUBLIC_CF_BEACON_TOKEN: ${{ vars.CF_BEACON_TOKEN }}
+        run: pnpm build
+
+      - run: pnpm validate
+      - run: pnpm links
+
+      # Pages adds no headers of its own: without these the site would go out without its policy
+      - name: Check the build carries its headers and redirects
+        run: |
+          grep -q "frame-ancestors 'none'" dist/_headers || { echo "::error::dist/_headers is missing"; exit 1; }
+          grep -q "kura-app.greytimelabs.com/join" dist/_redirects || { echo "::error::dist/_redirects is missing"; exit 1; }
+
+      - name: Deploy to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: ${{ vars.CLOUDFLARE_SITE_PAGES_PROJECT }}
+        run: |
+          pnpm dlx wrangler@4.145.0 pages deploy dist \
+            --project-name="$PROJECT" \
+            --branch=main \
+            --commit-hash="$GITHUB_SHA" \
+            --commit-message="$GITHUB_REF_NAME"

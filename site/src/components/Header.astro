@@ -1,0 +1,64 @@
+---
+import { NAV, REPO_URL, githubStars } from '../data/site';
+import Icon from './Icon.astro';
+import KuraMark from './KuraMark.astro';
+
+const stars = await githubStars();
+---
+
+<header class="sticky top-0 z-40 border-b border-line/70 bg-bg/85 backdrop-blur-md">
+  <div class="container-page flex h-16 items-center gap-6">
+    <a href="/" class="flex items-center gap-2.5 text-ink" aria-label="Kura Vault home">
+      <span class="flex size-8 items-center justify-center rounded-lg bg-accent text-accent-ink">
+        <KuraMark class="size-[18px]" />
+      </span>
+      <span class="text-[15px] font-semibold tracking-tight">Kura Vault</span>
+    </a>
+
+    <nav aria-label="Main" class="ml-4 hidden md:block">
+      <ul class="flex items-center gap-6 text-sm text-muted">
+        {
+          NAV.map((item) => (
+            <li>
+              <a href={item.href} class="transition-colors hover:text-ink">
+                {item.label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </nav>
+
+    <div class="ml-auto flex items-center gap-2">
+      <button
+        type="button"
+        data-theme-toggle
+        aria-pressed="false"
+        class="flex size-9 items-center justify-center rounded-full text-muted transition-colors hover:bg-accent-soft hover:text-ink"
+      >
+        <span class="sr-only">Dark theme</span>
+        <Icon name="moon" class="size-[18px] dark-hidden" />
+        <Icon name="sun" class="size-[18px] light-hidden" />
+      </button>
+      <a href={REPO_URL} class="btn btn-secondary px-3.5! py-2! text-sm!">
+        <Icon name="github" class="size-4" />
+        <span>GitHub</span>
+        {stars !== null && <span class="text-muted tabular-nums">{stars.toLocaleString('en-US')}</span>}
+      </a>
+    </div>
+  </div>
+
+  <nav aria-label="Main, small screens" class="border-t border-line/70 md:hidden">
+    <ul class="container-page flex items-center justify-between gap-4 overflow-x-auto py-2.5 text-[13px] text-muted">
+      {
+        NAV.map((item) => (
+          <li class="shrink-0">
+            <a href={item.href} class="hover:text-ink">
+              {item.label}
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </nav>
+</header>

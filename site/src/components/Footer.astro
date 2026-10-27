@@ -1,0 +1,84 @@
+---
+import { APP_URL, CONTACT_EMAIL, DOCS_URL, ORG_NAME, PLAY_URL, REPO_URL, VERSION } from '../data/site';
+import KuraMark from './KuraMark.astro';
+
+const columns = [
+  {
+    title: 'Product',
+    links: [
+      { href: '/#how-it-works', label: 'How it works' },
+      { href: '/#features', label: 'Features' },
+      { href: '/security', label: 'Security model' },
+      { href: '/compare', label: 'Compare' },
+    ],
+  },
+  {
+    title: 'Get it',
+    links: [
+      { href: '/#self-host', label: 'Self-host' },
+      { href: PLAY_URL, label: 'Google Play' },
+      { href: APP_URL, label: 'Web app' },
+      { href: `${REPO_URL}/releases`, label: 'Releases' },
+    ],
+  },
+  {
+    title: 'Project',
+    links: [
+      { href: REPO_URL, label: 'Source code' },
+      { href: `${DOCS_URL}/self-hosting.md`, label: 'Documentation' },
+      { href: `${REPO_URL}/blob/main/CHANGELOG.md`, label: 'Changelog' },
+      { href: `${REPO_URL}/blob/main/SECURITY.md`, label: 'Report a vulnerability' },
+    ],
+  },
+  {
+    title: 'Legal',
+    links: [
+      { href: '/privacy', label: 'Privacy policy' },
+      { href: '/delete-account', label: 'Delete your account' },
+      { href: `${REPO_URL}/blob/main/LICENSE`, label: 'MIT licence' },
+      { href: `mailto:${CONTACT_EMAIL}`, label: CONTACT_EMAIL },
+    ],
+  },
+];
+---
+
+<footer class="mt-24 border-t border-line bg-plaster">
+  <div class="container-page grid gap-10 py-14 md:grid-cols-[1.3fr_repeat(4,1fr)]">
+    <div class="max-w-xs">
+      <a href="/" class="flex items-center gap-2.5 text-ink">
+        <span class="flex size-8 items-center justify-center rounded-lg bg-accent text-accent-ink">
+          <KuraMark class="size-[18px]" />
+        </span>
+        <span class="text-[15px] font-semibold tracking-tight">Kura Vault</span>
+      </a>
+      <p class="mt-4 text-sm leading-relaxed text-muted">
+        Self-hosted, end-to-end encrypted storage for personal photos and videos.
+      </p>
+      <p class="mt-3 font-serif text-sm text-muted" lang="ja">蔵 &middot; <span lang="en">the storehouse</span></p>
+    </div>
+    {
+      columns.map((col) => (
+        <nav aria-label={col.title}>
+          <h2 class="font-sans text-[13px] font-semibold tracking-normal text-ink">{col.title}</h2>
+          <ul class="mt-3 space-y-2.5 text-sm text-muted">
+            {col.links.map((link) => (
+              <li>
+                <a href={link.href} class="break-words hover:text-ink">
+                  {link.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      ))
+    }
+  </div>
+  <div class="border-t border-line">
+    <div class="container-page flex flex-wrap items-center justify-between gap-3 py-5 text-[13px] text-muted">
+      <p>&copy; {new Date().getFullYear()} {ORG_NAME}. Released under the MIT licence.</p>
+      <p>
+        Version {VERSION} &middot; This site sets no cookies{import.meta.env.PUBLIC_CF_BEACON_TOKEN ? ' and uses only cookieless, aggregate visit counts' : ' and runs no analytics'}.
+      </p>
+    </div>
+  </div>
+</footer>

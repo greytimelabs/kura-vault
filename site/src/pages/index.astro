@@ -1,0 +1,345 @@
+---
+import CompareTable from '../components/CompareTable.astro';
+import HowItWorks from '../components/HowItWorks.astro';
+import Icon from '../components/Icon.astro';
+import InstallSnippet from '../components/InstallSnippet.astro';
+import KuraMark from '../components/KuraMark.astro';
+import AppMockup from '../components/mockups/AppMockup.astro';
+import Base from '../layouts/Base.astro';
+import { FAQ } from '../data/faq';
+import { faqPage, softwareApplication, sourceCode } from '../data/schema';
+import { APP_URL, DOCS_URL, PLAY_URL, REPO_URL } from '../data/site';
+
+const features = [
+  {
+    icon: 'eyeOff',
+    title: 'Vaults that stay out of sight',
+    body: 'Create as many vaults as you like, each with its own passphrase. Entering one opens only the vaults it matches. The others are not even listed.',
+  },
+  {
+    icon: 'share',
+    title: 'Share without sharing a passphrase',
+    body: 'Share a whole vault or a single album, for viewing or for adding. The key is sealed to the other person’s public key on your device. The server only relays ciphertext.',
+  },
+  {
+    icon: 'zap',
+    title: 'Straight to storage',
+    body: 'Uploads and downloads use short-lived pre-signed URLs, so media bytes never pass through the API. Bring your own S3 bucket or use the bundled one.',
+  },
+  {
+    icon: 'users',
+    title: 'Invite-only accounts',
+    body: 'There is no sign-up page. The owner adds people with one-time invite links, decides who may create vaults, and can cut an account off at once. The owner still cannot read anyone’s vault.',
+  },
+  {
+    icon: 'terminal',
+    title: 'Bring your library with you',
+    body: 'A command-line tool encrypts an existing folder of photos and videos on your computer, uploads it, and resumes if interrupted.',
+  },
+  {
+    icon: 'devices',
+    title: 'Android and web',
+    body: 'Use the Android app with fingerprint or face unlock, or the web client in any current browser. Keys live in memory only and are destroyed when the vault locks.',
+  },
+] as const;
+
+const secrets = [
+  { name: 'Password', opens: 'A session on the server', seen: 'The server, once per sign-in, to check a bcrypt hash' },
+  { name: 'Master passphrase', opens: 'Your account’s private keys', seen: 'Nobody. It is checked on your device' },
+  { name: 'Vault passphrase', opens: 'A vault you created', seen: 'Nobody' },
+];
+
+const title = 'Kura Vault: encrypted, self-hosted photo storage';
+const description =
+  'Open-source photo and video storage you host yourself. Everything is encrypted on your device; the server and bucket only ever hold ciphertext.';
+---
+
+<Base {title} {description} og="home" schema={[softwareApplication, sourceCode, faqPage(FAQ)]}>
+  <!-- Hero -->
+  <section class="overflow-hidden">
+    <div class="container-page grid items-center gap-16 pt-14 pb-24 sm:pt-20 lg:grid-cols-[1.05fr_1fr] lg:gap-12 lg:pt-24 lg:pb-32">
+      <div>
+        <p class="eyebrow flex items-center gap-2">
+          <span class="font-serif text-sm tracking-normal text-accent normal-case" lang="ja">蔵</span>
+          Open source &middot; Self-hosted &middot; End-to-end encrypted
+        </p>
+        <h1 class="mt-5 text-[2.6rem] leading-[1.08] sm:text-6xl">
+          Your photos, kept in a storehouse only you can open.
+        </h1>
+        <p class="mt-6 max-w-xl text-lg leading-relaxed text-muted">
+          Kura Vault is photo and video storage you run on your own server. Every file is encrypted on your device
+          before it is uploaded, so the server, the database and the storage bucket only ever hold ciphertext.
+        </p>
+        <div class="mt-9 flex flex-wrap gap-3">
+          <a href="#self-host" class="btn btn-primary">
+            Self-host in minutes
+            <Icon name="arrow" class="size-4" />
+          </a>
+          <a href={REPO_URL} class="btn btn-secondary">
+            <Icon name="github" class="size-4" />
+            View on GitHub
+          </a>
+        </div>
+        <p class="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted">
+          <a href={PLAY_URL} class="inline-flex items-center gap-1.5 hover:text-ink">
+            <Icon name="play" class="size-4" /> Get it on Google Play
+          </a>
+          <a href={APP_URL} class="inline-flex items-center gap-1.5 hover:text-ink">
+            <Icon name="globe" class="size-4" /> Open the web app
+          </a>
+        </p>
+        <ul class="mt-10 flex flex-wrap gap-x-5 gap-y-2 border-t border-line pt-6 text-[13px] text-muted">
+          <li>MIT licence</li>
+          <li>AES-256-GCM</li>
+          <li>Argon2id</li>
+          <li>X25519 + Ed25519</li>
+          <li>No tracking in the apps</li>
+        </ul>
+      </div>
+      <div class="pb-10 lg:pb-0">
+        <AppMockup />
+      </div>
+    </div>
+  </section>
+
+  <!-- Why -->
+  <section class="border-y border-line bg-plaster" aria-labelledby="why">
+    <div class="container-page grid gap-10 py-20 md:grid-cols-[1fr_1.4fr] md:gap-16 lg:py-24">
+      <div>
+        <p class="eyebrow">Why it exists</p>
+        <h2 id="why" class="mt-3 text-3xl leading-tight sm:text-4xl">Whoever holds the disk holds the photos.</h2>
+      </div>
+      <div class="space-y-5 text-[17px] leading-relaxed text-muted">
+        <p>
+          Cloud photo services keep the keys to your library. Most self-hosted photo apps do the same thing on your
+          own hardware: the server reads every photo so it can index it, which means anyone with the server, its
+          backups or its storage bucket can look through it too.
+        </p>
+        <p>
+          Kura Vault takes the other path. The server stores and sorts your library without ever seeing inside it.
+          You can put it on a cheap VPS or in a cloud bucket, share it with family, and none of those places learn
+          what your photos show.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section id="how-it-works" class="container-page py-24 lg:py-28" aria-labelledby="how-title">
+    <div class="max-w-2xl">
+      <p class="eyebrow">How it works</p>
+      <h2 id="how-title" class="mt-3 text-3xl leading-tight sm:text-4xl">Encrypted on your device. Stored as noise.</h2>
+      <p class="mt-4 text-[17px] leading-relaxed text-muted">
+        Someone with full access to the API, the database and the bucket still cannot view anything without a
+        user’s master passphrase.
+      </p>
+    </div>
+    <div class="mt-12">
+      <HowItWorks />
+    </div>
+    <p class="mt-8 text-[15px] text-muted">
+      The full design, threats and limits are on the <a href="/security" class="link">security page</a>.
+    </p>
+  </section>
+
+  <!-- Features -->
+  <section id="features" class="border-t border-line py-24 lg:py-28" aria-labelledby="features-title">
+    <div class="container-page">
+      <div class="max-w-2xl">
+        <p class="eyebrow">What it does</p>
+        <h2 id="features-title" class="mt-3 text-3xl leading-tight sm:text-4xl">
+          A private photo library for you and the people you trust.
+        </h2>
+      </div>
+      <ul class="mt-14 grid gap-x-10 gap-y-12 sm:grid-cols-2 lg:grid-cols-3">
+        {
+          features.map((f) => (
+            <li>
+              <span class="flex size-10 items-center justify-center rounded-full border border-line text-accent">
+                <Icon name={f.icon} class="size-5" />
+              </span>
+              <h3 class="mt-4 text-xl">{f.title}</h3>
+              <p class="mt-2 text-[15px] leading-relaxed text-muted">{f.body}</p>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <!-- The kura -->
+  <section class="bg-[#233a5e] text-[#f2ece1]" aria-labelledby="kura-title">
+    <div class="container-page grid items-center gap-12 py-24 md:grid-cols-[auto_1fr] md:gap-20 lg:py-28">
+      <div class="flex justify-center">
+        <KuraMark class="size-40 opacity-95 sm:size-52" />
+      </div>
+      <div class="max-w-xl">
+        <p class="text-xs font-semibold tracking-[0.14em] uppercase opacity-70">The name</p>
+        <h2 id="kura-title" class="mt-3 text-3xl leading-tight sm:text-4xl">
+          <span lang="ja">蔵</span>, the storehouse.
+        </h2>
+        <div class="mt-5 space-y-4 text-[17px] leading-relaxed opacity-85">
+          <p>
+            A <em>kura</em> is the thick-walled Japanese storehouse that kept a family’s valuables safe from fire
+            and theft. Its plastered walls outlasted the house beside it.
+          </p>
+          <p>
+            The mark shows one from the gable end, with a keyhole for a door. The thin gap under the roof is the
+            kura’s raised, ventilated outer roof, the <span lang="ja" class="whitespace-nowrap">置き屋根</span> (<em>okiyane</em>). Our
+            colours are aizome, the indigo of Japanese dye, and the off-white of lime plaster.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Security at a glance -->
+  <section class="container-page py-24 lg:py-28" aria-labelledby="security-title">
+    <div class="grid gap-12 lg:grid-cols-[1fr_1.3fr] lg:gap-16">
+      <div>
+        <p class="eyebrow">Security at a glance</p>
+        <h2 id="security-title" class="mt-3 text-3xl leading-tight sm:text-4xl">Three secrets, and only one reaches the server.</h2>
+        <p class="mt-4 text-[17px] leading-relaxed text-muted">
+          The password signs you in. The passphrases open your keys, and they never leave your device.
+        </p>
+        <div class="mt-8 rounded-xl border border-line bg-surface p-5 text-[15px] leading-relaxed">
+          <p class="font-semibold">An honest status</p>
+          <p class="mt-1.5 text-muted">
+            Kura Vault is young and has not had an independent security audit yet. The design is documented in
+            full and open to review. Until it is audited, don’t make it the only copy of anything you care about.
+          </p>
+        </div>
+        <a href="/security" class="btn btn-secondary mt-6">
+          Read the security model <Icon name="arrow" class="size-4" />
+        </a>
+      </div>
+      <div class="table-scroll">
+        <table class="w-full min-w-[30rem] text-left text-[15px]">
+          <caption class="sr-only">The three secrets in Kura Vault</caption>
+          <thead>
+            <tr class="border-b border-ink/80 text-[13px] text-muted">
+              <th scope="col" class="py-3 pr-4 font-medium">Secret</th>
+              <th scope="col" class="py-3 pr-4 font-medium">What it opens</th>
+              <th scope="col" class="py-3 font-medium">Who sees it</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              secrets.map((s) => (
+                <tr class="border-b border-line align-top">
+                  <th scope="row" class="py-4 pr-4 font-serif text-lg font-medium">{s.name}</th>
+                  <td class="py-4 pr-4 text-muted">{s.opens}</td>
+                  <td class="py-4 text-muted">{s.seen}</td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+        <ul class="mt-8 grid gap-4 text-[15px] text-muted sm:grid-cols-2">
+          <li class="flex gap-2.5"><Icon name="check" class="mt-0.5 size-4 shrink-0 text-accent" />Every ciphertext authenticates the ids it belongs to, so the server cannot swap keys or files between rows.</li>
+          <li class="flex gap-2.5"><Icon name="check" class="mt-0.5 size-4 shrink-0 text-accent" />Keys are sealed only to users whose keys the owner certified, and used only if their sender signed them.</li>
+          <li class="flex gap-2.5"><Icon name="check" class="mt-0.5 size-4 shrink-0 text-accent" />Keys are held in memory and destroyed on lock, after at most 15 idle minutes, and when the app or tab closes.</li>
+          <li class="flex gap-2.5"><Icon name="check" class="mt-0.5 size-4 shrink-0 text-accent" />Three independent implementations are kept byte-compatible by shared test vectors.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Self-host -->
+  <section id="self-host" class="border-y border-line bg-plaster" aria-labelledby="selfhost-title">
+    <div class="container-page grid gap-12 py-24 lg:grid-cols-[1fr_1.2fr] lg:gap-16 lg:py-28">
+      <div>
+        <p class="eyebrow">Self-host</p>
+        <h2 id="selfhost-title" class="mt-3 text-3xl leading-tight sm:text-4xl">One command, on your own server.</h2>
+        <p class="mt-4 text-[17px] leading-relaxed text-muted">
+          The installer downloads a release, checks every file against its published checksums, generates all
+          secrets, and asks before it starts anything. It needs no root.
+        </p>
+        <dl class="mt-8 grid grid-cols-2 gap-x-6 gap-y-5 text-[15px]">
+          <div>
+            <dt class="font-semibold">Server</dt>
+            <dd class="mt-0.5 text-muted">Linux, amd64 or arm64, 1 CPU and 1 GB of memory</dd>
+          </div>
+          <div>
+            <dt class="font-semibold">Runtime</dt>
+            <dd class="mt-0.5 text-muted">Docker with Compose v2</dd>
+          </div>
+          <div>
+            <dt class="font-semibold">Storage</dt>
+            <dd class="mt-0.5 text-muted">Bundled Garage, or AWS S3, Cloudflare R2, Backblaze B2</dd>
+          </div>
+          <div>
+            <dt class="font-semibold">HTTPS</dt>
+            <dd class="mt-0.5 text-muted">Caddy, nginx, Traefik or Cloudflare Tunnel in front</dd>
+          </div>
+        </dl>
+      </div>
+      <div class="min-w-0">
+        <InstallSnippet />
+        <p class="mt-5 text-[15px] text-muted">
+          It brings up the API, the web client, PostgreSQL and the bundled storage. Put your HTTPS proxy in front,
+          open the address and enter the setup key the installer printed. Then invite your family. See the
+          <a href={`${DOCS_URL}/self-hosting.md`} class="link">self-hosting guide</a> for upgrades, backups and
+          your own bucket.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Compare -->
+  <section class="container-page py-24 lg:py-28" aria-labelledby="compare-title">
+    <div class="max-w-2xl">
+      <p class="eyebrow">Compared</p>
+      <h2 id="compare-title" class="mt-3 text-3xl leading-tight sm:text-4xl">What you trade for <span class="whitespace-nowrap">end-to-end</span> encryption.</h2>
+      <p class="mt-4 text-[17px] leading-relaxed text-muted">
+        A server that cannot see your photos cannot index them either. If face recognition matters more to you than
+        privacy from the host, another app may suit you better. We say so on each comparison.
+      </p>
+    </div>
+    <div class="mt-10">
+      <CompareTable />
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="border-t border-line" aria-labelledby="faq-title">
+    <div class="container-page grid gap-10 py-24 lg:grid-cols-[1fr_2fr] lg:gap-16 lg:py-28">
+      <div>
+        <p class="eyebrow">Questions</p>
+        <h2 id="faq-title" class="mt-3 text-3xl leading-tight sm:text-4xl">Frequently asked</h2>
+      </div>
+      <div class="divide-y divide-line border-y border-line">
+        {
+          FAQ.map(({ q, a }) => (
+            <details class="group py-5">
+              <summary class="flex cursor-pointer list-none items-start justify-between gap-6 font-serif text-lg font-medium [&::-webkit-details-marker]:hidden">
+                <h3 class="font-[inherit]">{q}</h3>
+                <span class="mt-1 shrink-0 text-muted transition-transform group-open:rotate-45" aria-hidden="true">
+                  <Icon name="x" class="size-4 rotate-45" />
+                </span>
+              </summary>
+              <p class="mt-3 max-w-2xl text-[15.5px] leading-relaxed text-muted">{a}</p>
+            </details>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- Closing -->
+  <section class="container-page pb-4" aria-labelledby="cta-title">
+    <div class="rounded-3xl border border-line bg-surface px-6 py-16 text-center sm:px-12">
+      <span class="mx-auto flex size-14 items-center justify-center rounded-2xl bg-accent text-accent-ink">
+        <KuraMark class="size-8" />
+      </span>
+      <h2 id="cta-title" class="mx-auto mt-6 max-w-2xl text-3xl leading-tight sm:text-4xl">
+        Keep your memories where only you hold the key.
+      </h2>
+      <p class="mx-auto mt-4 max-w-xl text-[17px] text-muted">Free and open source. Your server, your bucket, your keys.</p>
+      <div class="mt-8 flex flex-wrap justify-center gap-3">
+        <a href="#self-host" class="btn btn-primary">Self-host Kura Vault <Icon name="arrow" class="size-4" /></a>
+        <a href={REPO_URL} class="btn btn-secondary"><Icon name="github" class="size-4" /> Star on GitHub</a>
+      </div>
+    </div>
+  </section>
+</Base>
