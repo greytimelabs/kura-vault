@@ -1,8 +1,8 @@
 # Cloudflare Pages response headers. The site has no inline script or style
-# (astro.config.mjs), so the policy needs no 'unsafe-inline'. The only
-# third party is Cloudflare Web Analytics.
+# (astro.config.mjs), so the policy needs no 'unsafe-inline'. The
+# third parties are Cloudflare Web Analytics and the Product Hunt badge image.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com; img-src 'self' data:; style-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com; img-src 'self' data: https://api.producthunt.com; style-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin

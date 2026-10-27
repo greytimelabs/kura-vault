@@ -17,6 +17,8 @@ it never sees a passphrase, a key, or a decrypted file.
 **Android:** [Google Play](https://play.google.com/store/apps/details?id=com.kuravault.app) ·
 **Web app:** [kura-app.greytimelabs.com](https://kura-app.greytimelabs.com)
 
+<a href="https://www.producthunt.com/products/kura-vault?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-kura-vault" target="_blank" rel="noopener noreferrer"><img alt="Kura Vault on Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1294431&theme=light"></a>
+
 > **Status:** early and under active development. It has not had an
 > independent security review. Do not make it the only copy of anything you
 > care about.
