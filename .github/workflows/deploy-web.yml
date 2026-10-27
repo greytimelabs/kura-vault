@@ -75,7 +75,7 @@ jobs:
           VITE_MULTI_SERVER: 'true'
         run: |
           pnpm exec vite build
-          cp cloudflare/_headers dist/
+          cp cloudflare/_headers cloudflare/_redirects dist/
 
       # Pages adds no headers of its own: without these the page would go out unprotected
       - name: Check the build carries its security policy

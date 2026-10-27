@@ -1,0 +1,66 @@
+---
+// A one-glance summary across all comparisons; each column links to its full page.
+import Icon from './Icon.astro';
+
+type Mark = 'yes' | 'no' | 'partial';
+const columns = [
+  { name: 'Kura Vault', href: null },
+  { name: 'Immich', href: '/compare/immich' },
+  { name: 'Ente', href: '/compare/ente' },
+  { name: 'Google Photos', href: '/compare/google-photos-icloud' },
+  { name: 'PhotoPrism', href: '/compare/photoprism-nextcloud' },
+];
+const rows: { label: string; marks: Mark[] }[] = [
+  { label: 'End-to-end encrypted', marks: ['yes', 'no', 'yes', 'no', 'no'] },
+  { label: 'Self-hosted', marks: ['yes', 'yes', 'yes', 'no', 'yes'] },
+  { label: 'Open source', marks: ['yes', 'yes', 'yes', 'no', 'yes'] },
+  { label: 'Face recognition and smart search', marks: ['no', 'yes', 'yes', 'yes', 'yes'] },
+];
+const icon = { yes: 'check', no: 'x', partial: 'minus' } as const;
+const word = { yes: 'Yes', no: 'No', partial: 'Partly' } as const;
+---
+
+<div class="table-scroll rounded-2xl border border-line bg-surface">
+  <table class="w-full min-w-[40rem] text-[15px]">
+    <caption class="sr-only">Kura Vault compared with other photo storage</caption>
+    <thead>
+      <tr class="border-b border-line">
+        <td class="p-4"></td>
+        {
+          columns.map((c, i) => (
+            <th scope="col" class={`p-4 text-center text-[13px] font-semibold ${i === 0 ? 'bg-accent-soft text-ink' : 'text-muted'}`}>
+              {c.href ? (
+                <a href={c.href} class="underline decoration-line underline-offset-4 hover:text-ink hover:decoration-current">
+                  {c.name}
+                </a>
+              ) : (
+                c.name
+              )}
+            </th>
+          ))
+        }
+      </tr>
+    </thead>
+    <tbody>
+      {
+        rows.map((r) => (
+          <tr class="border-b border-line last:border-0">
+            <th scope="row" class="p-4 text-left font-medium">{r.label}</th>
+            {r.marks.map((m, i) => (
+              <td class={`p-4 text-center ${i === 0 ? 'bg-accent-soft' : ''}`}>
+                <span class={`inline-flex ${m === 'yes' ? 'text-accent' : 'text-muted'}`}>
+                  <Icon name={icon[m]} class="size-[18px]" />
+                  <span class="sr-only">{word[m]}</span>
+                </span>
+              </td>
+            ))}
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+</div>
+<p class="mt-4 text-[13px] text-muted">
+  Google Photos column: Google Photos. iCloud Photos is end-to-end encrypted only with Advanced Data Protection turned on.
+  Kura Vault does not have automatic background backup or an independent audit yet. Details and sources on each <a href="/compare" class="link">comparison page</a>.
+</p>

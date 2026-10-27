@@ -13,6 +13,10 @@ Media is encrypted on the device before it is uploaded. The server stores
 opaque blobs in S3-compatible object storage and encrypted keys in PostgreSQL;
 it never sees a passphrase, a key, or a decrypted file.
 
+**Website:** [kura.greytimelabs.com](https://kura.greytimelabs.com) ·
+**Android:** [Google Play](https://play.google.com/store/apps/details?id=com.kuravault.app) ·
+**Web app:** [kura-app.greytimelabs.com](https://kura-app.greytimelabs.com)
+
 > **Status:** early and under active development. It has not had an
 > independent security review. Do not make it the only copy of anything you
 > care about.
@@ -43,6 +47,7 @@ it never sees a passphrase, a key, or a decrypted file.
 | [`web/`](web) | Browser client | React, TypeScript, Vite |
 | [`app/`](app) | Mobile client | Flutter (BLoC) |
 | [`migration-cli/`](migration-cli) | Bulk encrypt-and-upload tool | Node.js |
+| [`site/`](site) | The website at kura.greytimelabs.com | Astro, static |
 | [`deploy/`](deploy) | Production Docker Compose bundle and installer | Docker Compose, Garage |
 | [`crypto-vectors.json`](crypto-vectors.json) | Shared test vectors that keep the three clients byte-compatible | |
 | [`docs/`](docs) | All project documentation | |

@@ -1,0 +1,237 @@
+---
+// A plain-language version of docs/security.md and docs/crypto/README.md.
+// Those files are the source of truth: change them first, then this page.
+import Article from '../layouts/Article.astro';
+import { article } from '../data/schema';
+import { DOCS_URL, REPO_URL } from '../data/site';
+
+const title = 'Security model: how Kura Vault encrypts | Kura Vault';
+const description =
+  'How Kura Vault encrypts photos on your device: AES-256-GCM, Argon2id, sealed and signed keys, what the server can see, and where protection stops.';
+const updated = '27 October 2026';
+
+const threats = [
+  ['Storage provider or bucket compromise', 'Blobs are AES-256-GCM ciphertext; keys are never in the bucket.'],
+  ['Database or API server compromise', 'Only wrapped keys, salts, public keys and structural metadata are stored.'],
+  ['The server substitutes a public key to receive a shared key', 'Keys are sealed only to users whose keys the owner certified. A new user’s keys are bound to their invite link, which the server never sees.'],
+  ['The server plants a key it knows on a user', 'A shared key is used only if its certified sender signed it.'],
+  ['The server moves a wrapped key or blob to another row', 'Every ciphertext authenticates the ids it belongs to.'],
+  ['Someone finds the API', 'No sign-up: accounts come from the owner’s invite links. bcrypt passwords, lockout and rate limiting.'],
+  ['Someone finds a new server before its owner does', 'Creating the owner needs the setup key from the server’s log or environment.'],
+  ['Stolen access token', '15-minute lifetime. It grants ciphertext and short-lived URLs, not keys.'],
+  ['Stolen refresh token', 'Stored hashed, rotated on every use, revoked on logout; an httpOnly cookie in browsers on the server’s own address.'],
+  ['Leaked storage URL', 'Pre-signed, valid 60 seconds for downloads and 15 minutes for uploads. It yields ciphertext only.'],
+  ['Passphrase guessing', 'Argon2id with a 64 MiB memory cost per guess.'],
+  ['Someone learns a vault passphrase', 'It opens nothing without that account’s private keys as well.'],
+  ['Someone looks at your unlocked app', 'Vaults you created are never listed; only the ones matching an entered passphrase open.'],
+  ['Lost or borrowed device', 'Keys are held in memory only and destroyed on lock, after the chosen idle time (15 minutes at most), and when the app or tab closes. The exception is the app’s optional fingerprint or face unlock.'],
+  ['A user should no longer have access', 'Unsharing deletes their wrapped keys and is enforced on their next request.'],
+];
+---
+
+<Article
+  {title}
+  {description}
+  og="security"
+  eyebrow="Security model"
+  heading="What Kura Vault protects, and where it stops"
+  lede="Kura Vault is built so that the server, the database and the storage bucket can be fully compromised without anyone seeing a single photo. This page explains how, in plain language, including the limits."
+  {updated}
+  trail={[{ name: 'Security', path: '/security' }]}
+  toc={[
+    { id: 'guarantee', label: 'The core guarantee' },
+    { id: 'secrets', label: 'Three secrets' },
+    { id: 'keys', label: 'How the keys fit together' },
+    { id: 'trust', label: 'Whose public key is this?' },
+    { id: 'threats', label: 'Threats and mitigations' },
+    { id: 'not-hidden', label: 'What is not hidden' },
+    { id: 'limits', label: 'Limits' },
+    { id: 'hosted-client', label: 'The hosted web client' },
+    { id: 'android', label: 'The Android app' },
+    { id: 'deployment', label: 'How a server is hardened' },
+    { id: 'verify', label: 'Check it yourself' },
+  ]}
+  schema={[article({ headline: 'Kura Vault security model', description, path: '/security', modified: '2026-10-27' })]}
+>
+  <p>
+    The technical reference is <a href={`${DOCS_URL}/security.md`}>docs/security.md</a> and
+    <a href={`${DOCS_URL}/crypto/README.md`}>docs/crypto</a> in the repository. To report a vulnerability, see
+    <a href={`${REPO_URL}/blob/main/SECURITY.md`}>SECURITY.md</a>. Kura Vault has not had an independent audit yet.
+  </p>
+
+  <h2 id="guarantee">The core guarantee</h2>
+  <p>
+    Photos, videos, file names, location data, album names and vault names are encrypted on your device. Every key is
+    either random or derived from a passphrase that never leaves the device, and is stored only wrapped: under a
+    passphrase, under another key, or sealed to a user’s public key. The API, the database and the storage bucket hold
+    only ciphertext and wrapped keys.
+  </p>
+  <p>
+    <strong>Someone with full access to all three still cannot view anything without a user’s master passphrase.</strong>
+  </p>
+
+  <h2 id="secrets">Three secrets</h2>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th scope="col">Secret</th><th scope="col">What it opens</th><th scope="col">Who sees it</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Password</th><td>The API: a session on the server</td><td>The server, once per sign-in, to check a bcrypt hash</td></tr>
+        <tr><th scope="row">Master passphrase</th><td>Your account’s private keys</td><td>Nobody. It is checked on your device</td></tr>
+        <tr><th scope="row">Vault passphrase</th><td>A vault you created, on top of the master passphrase</td><td>Nobody</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The apps refuse a master passphrase that equals your password, because the server sees passwords.</p>
+
+  <h2 id="keys">How the keys fit together</h2>
+  <p>
+    Every vault, album and item has its own random key. Each key is wrapped by the one above it, and the top of the
+    chain is opened only by a passphrase on your device.
+  </p>
+  <pre><code>master passphrase ─Argon2id─► master key ─► your private keys
+                                              (X25519 for sealing, Ed25519 for signing)
+vault passphrase  ─Argon2id─► passphrase key   (vaults you created)
+
+vault key   random, one per vault
+  ├─ your copy        sealed to your public key, under your passphrase key
+  ├─ each recipient   sealed to their public key, signed by you
+  └─ wraps ─► album key   random, one per album
+  └─ wraps ─► media key   random, one per item
+                 └─ encrypts ─► thumbnail, preview, original, metadata</code></pre>
+  <ul>
+    <li><strong>Key derivation:</strong> Argon2id v1.3, 3 iterations, 64 MiB of memory, a 16-byte random salt.</li>
+    <li><strong>Encryption:</strong> AES-256-GCM with a fresh random 12-byte IV for every encryption.</li>
+    <li>
+      <strong>Sealing to a person:</strong> an ephemeral X25519 key exchange, HKDF-SHA256, then AES-256-GCM.
+    </li>
+    <li><strong>Signatures:</strong> Ed25519.</li>
+    <li>
+      <strong>Binding:</strong> every encryption authenticates a label naming what it is and the rows it belongs to,
+      so the server cannot move a key or a file to another user, vault, album or item.
+    </li>
+  </ul>
+
+  <h2 id="trust">Whose public key is this?</h2>
+  <p>
+    The server hands out public keys, so in principle it could hand out its own. Two signed statements, checked on
+    your device, stop that. The server owner’s client signs a <strong>certificate</strong> for every user’s keys, and
+    your device only seals a key to someone whose certificate verifies. Every shared key also carries the
+    <strong>sharer’s signature</strong>, so the server cannot plant a key it knows.
+  </p>
+  <p>
+    A new user’s keys are bound to their invite link. The link carries a 32-byte secret in its <code>#fragment</code>,
+    which browsers never send to any server, and the owner’s client checks the binding before it certifies anyone.
+  </p>
+
+  <h2 id="threats">Threats and mitigations</h2>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th scope="col">Threat</th><th scope="col">Mitigation</th></tr></thead>
+      <tbody>
+        {threats.map(([threat, mitigation]) => <tr><th scope="row">{threat}</th><td>{mitigation}</td></tr>)}
+      </tbody>
+    </table>
+  </div>
+
+  <h2 id="not-hidden">What is not hidden</h2>
+  <p>
+    The server needs some information to sort, paginate and authorise. Anyone who compromises it can see:
+  </p>
+  <ul>
+    <li>Usernames, each account’s role and access level, and public keys.</li>
+    <li>
+      How many vaults, albums and items exist, which items are in which, who created each vault, and who it is shared
+      with.
+    </li>
+    <li>Per item: photo or video, capture time, dimensions, duration, file size, and who uploaded it.</li>
+    <li>Access patterns: when an account signs in and what it fetches.</li>
+  </ul>
+
+  <h2 id="limits">Limits, by design or not yet built</h2>
+  <ul>
+    <li>
+      <strong>No passphrase recovery.</strong> A forgotten master passphrase makes everything only that account could
+      open permanently unreadable. The owner cannot reset it.
+    </li>
+    <li>
+      <strong>Revoking access is a server cut-off, not re-encryption.</strong> Someone who kept a key and later
+      obtains ciphertext from a breach could still decrypt it. Key rotation is not built yet.
+    </li>
+    <li><strong>Download links already issued stay valid for up to 60 seconds</strong> after access is removed.</li>
+    <li>
+      <strong>Deleting cannot reach copies that already left</strong>, such as downloads, operator backups or
+      versioned buckets.
+    </li>
+    <li>
+      <strong>Read versus write is enforced by the server.</strong> What stops a view-only user from uploading is the
+      API, not the cryptography.
+    </li>
+    <li>
+      <strong>Whoever opens an invite link first becomes that user.</strong> Links work once, for 24 hours. Send them
+      over a channel you trust.
+    </li>
+    <li>
+      <strong>The owner is trusted to say who the users are</strong>, not to read anything. A malicious owner could
+      certify a key of their own under someone’s name.
+    </li>
+    <li>
+      <strong>Hidden vaults are hidden from people looking at your screen</strong>, not from the server operator.
+    </li>
+    <li><strong>A compromised device is out of scope.</strong> Malware on an unlocked device can read what you can.</li>
+    <li>
+      <strong>A web client is code served by its host.</strong> A compromised host could serve a modified client. The
+      strongest setup is the web client served by your own server.
+    </li>
+  </ul>
+
+  <h2 id="hosted-client">The hosted web client</h2>
+  <p>
+    Greytimelabs hosts a web client at kura-app.greytimelabs.com that can connect to any Kura Vault server. It is
+    convenient, and weaker than the client your own server serves, in three ways:
+  </p>
+  <ul>
+    <li>
+      <strong>Refresh tokens are kept in browser storage</strong>, because a cookie cannot cross sites. A script
+      injection bug could steal a session, which reaches encrypted blobs and metadata but no passphrase or key.
+    </li>
+    <li><strong>The host is trusted by every server’s users</strong>, because it serves the code that handles passphrases.</li>
+    <li><strong>The content policy is wider</strong>: it allows connections to any HTTPS origin.</li>
+  </ul>
+
+  <h2 id="android">The Android app</h2>
+  <ul>
+    <li>Screenshots and screen recording are blocked, and the recent-apps card is blank.</li>
+    <li>Nothing is in a device backup. Sign-in tokens are in the platform keystore.</li>
+    <li>Time in the background counts toward the lock time: 1, 5 or 15 minutes.</li>
+    <li>
+      Fingerprint or face unlock is optional and off until you turn it on. It keeps the account’s master key,
+      encrypted by a hardware key that only a biometric match releases, never the device PIN. Vault passphrases are
+      always typed.
+    </li>
+    <li>
+      The app never asks to read your photo library. It sees only what the system picker returns, and deletes its
+      temporary plaintext copy once it is uploaded.
+    </li>
+  </ul>
+
+  <h2 id="deployment">How a server is hardened</h2>
+  <ul>
+    <li>One published port, on loopback by default. The database and bundled storage sit on internal networks.</li>
+    <li>Every container has a read-only root filesystem, no Linux capabilities and <code>no-new-privileges</code>.</li>
+    <li>Passwords are bcrypt hashes; refresh and invite tokens are stored only as SHA-256 hashes.</li>
+    <li>Five failed logins lock an account for 15 minutes. Requests are rate limited.</li>
+    <li>The web image sends a strict Content-Security-Policy that limits connections to the server and its bucket.</li>
+    <li>The installer and upgrade script check every file against the release’s published checksums.</li>
+  </ul>
+
+  <h2 id="verify">Check it yourself</h2>
+  <p>
+    The web client, the Android app and the import tool are three independent implementations of the same format.
+    A shared file of <a href={`${REPO_URL}/blob/main/crypto-vectors.json`}>test vectors</a> holds fixed inputs and the
+    exact bytes expected from them, and all three test suites check it. The access and tampering rules are exercised
+    against a real server in the web client’s API tests. Everything is in the
+    <a href={REPO_URL}>repository</a>, under the MIT licence.
+  </p>
+</Article>

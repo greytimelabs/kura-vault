@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AuthLayout } from './AuthLayout';
 import { AccountMenu } from '../shell/AccountMenu';
 import { Button } from '@/components/ui/Button';
 import { Field } from '@/components/ui/Field';
+import { PRIVACY_URL } from '@/lib/config';
 import { checkServer, loginPath, serverNeedsSetup } from '@/lib/session';
 import { useAccountStore } from '@/state/accountStore';
 
@@ -47,9 +48,9 @@ export function ServerPage() {
               Saved accounts <AccountMenu />
             </div>
           )}
-          <Link to="/privacy" className="hover:text-ink">
+          <a href={PRIVACY_URL} className="hover:text-ink">
             Privacy policy
-          </Link>
+          </a>
         </div>
       }
     >

@@ -1,0 +1,14 @@
+---
+import type { Cell } from '../data/compare';
+import Icon from './Icon.astro';
+
+const { cell } = Astro.props as { cell: Cell };
+const icon = { yes: 'check', no: 'x', partial: 'minus' } as const;
+---
+
+<span class="flex gap-2">
+  <span class={`mt-1 shrink-0 ${cell.mark === 'yes' ? 'text-accent' : 'text-muted'}`}>
+    <Icon name={icon[cell.mark]} class="size-4" />
+  </span>
+  <span>{cell.text}</span>
+</span>

@@ -9,3 +9,6 @@
  * because a cookie cannot cross to another site.
  */
 export const MULTI_SERVER = import.meta.env.VITE_MULTI_SERVER === 'true';
+
+/** The privacy policy, on the project's website with the store listings' other pages. */
+export const PRIVACY_URL = 'https://kura.greytimelabs.com/privacy';

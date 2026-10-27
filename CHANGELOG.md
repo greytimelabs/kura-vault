@@ -7,7 +7,21 @@ upgrading is marked **Action**. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The official hosted web client moved from `kura.greytimelabs.com` to
+  `kura-app.greytimelabs.com`. `kura.greytimelabs.com` is now the project's
+  website; its old client paths, invite links included, redirect to the new
+  address. Accounts saved in the browser do not carry over: add the server
+  again. **Action:** if your server's `CORS_ORIGINS` lists
+  `https://kura.greytimelabs.com`, replace it with
+  `https://kura-app.greytimelabs.com`, in your bucket's CORS rule too.
+- The privacy policy and the account deletion page moved from the hosted web
+  client to the website, at the same addresses on `kura.greytimelabs.com`.
+
 ### Added
+
+- The website, in `site/`, and a workflow that deploys it to Cloudflare Pages.
 
 - `upgrade.sh`, published with each release next to `install.sh`: it moves a
   deployment to another release, checking the files against `SHA256SUMS` and

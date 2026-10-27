@@ -3,7 +3,8 @@
 //   node build.mjs [path/to/Inter-otf-dir]
 //
 // Writes the SVGs to branding/, the PNG renders to branding/export/, and the
-// web client's favicon and touch icon to web/public/.
+// favicon and touch icon of the web client (web/public/) and the website
+// (site/public/).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +17,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const B = join(here, '..');
 const X = join(B, 'export');
 const WEB = join(B, '..', 'web', 'public');
+const SITE = join(B, '..', 'site', 'public');
 const fontDir = process.argv[2] ?? join(here, 'fonts');
 mkdirSync(X, { recursive: true });
 
@@ -138,9 +140,11 @@ png(svg(696, 672, markGroup(C.indigo), MARK_VB), join(X, 'logo-mark-512.png'), 5
 opaquePng(featureSvg, join(X, 'play-feature-graphic-1024x500.png'), 1024);
 opaquePng(banner(1280, 640), join(X, 'github-social-1280x640.png'), 1280);
 
-// Web client.
-writeFileSync(join(WEB, 'favicon.svg'), faviconSvg);
-png(tileSvg, join(WEB, 'apple-touch-icon.png'), 180);
+// Web client and website.
+for (const dir of [WEB, SITE]) {
+  writeFileSync(join(dir, 'favicon.svg'), faviconSvg);
+  png(tileSvg, join(dir, 'apple-touch-icon.png'), 180);
+}
 
 // Contrast of the pairs the brand uses.
 const lum = (hex) => {

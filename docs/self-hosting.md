@@ -325,6 +325,21 @@ each release tag, or when run by hand. It does nothing until it is configured:
    `CLOUDFLARE_API_TOKEN`. Add the variables `CLOUDFLARE_ACCOUNT_ID` and
    `CLOUDFLARE_PAGES_PROJECT` (the project's name).
 
+The workflow also copies [`web/cloudflare/_redirects`](../web/cloudflare/_redirects),
+which sends `/privacy` and `/delete-account` to the website. The official
+hosted client is at `https://kura-app.greytimelabs.com`; to let its users reach
+your server, add that origin to `CORS_ORIGINS` and to the bucket's CORS rule.
+
+#### The website
+
+[`.github/workflows/deploy-site.yml`](../.github/workflows/deploy-site.yml)
+deploys the website in [`site/`](../site) (kura.greytimelabs.com) to a second
+Cloudflare Pages project, on every push to `main` that changes it, or when run
+by hand. It uses the same `cloudflare-pages` environment. Create a second
+Direct Upload project and add the variable `CLOUDFLARE_SITE_PAGES_PROJECT`.
+To count visits with Cloudflare Web Analytics, add the site in the Cloudflare
+dashboard and put its token in the variable `CF_BEACON_TOKEN`.
+
 ## Backups
 
 Back up three things. All three are needed to restore:

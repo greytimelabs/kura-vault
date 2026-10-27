@@ -1,0 +1,22 @@
+---
+import { INSTALL_COMMANDS } from '../data/site';
+import Icon from './Icon.astro';
+---
+
+<div class="overflow-hidden rounded-2xl bg-code-bg text-code-ink shadow-[0_24px_48px_-28px_rgb(20_26_36/0.5)]">
+  <div class="flex items-center justify-between border-b border-white/10 px-4 py-2.5">
+    <span class="font-mono text-xs text-code-ink/60">Install on your server</span>
+    <button
+      type="button"
+      data-copy="install-commands"
+      class="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-code-ink/75 transition-colors hover:bg-white/10 hover:text-code-ink"
+    >
+      <Icon name="copy" class="size-3.5" />
+      <span data-copy-label>Copy</span>
+    </button>
+  </div>
+  <pre class="px-4 py-4 font-mono text-[13px] leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]"><code id="install-commands">{INSTALL_COMMANDS.join('\n')}</code></pre>
+  <p class="border-t border-white/10 px-4 py-2.5 font-mono text-xs text-code-ink/60">
+    Read install.sh before you run it. <span class="text-code-ink/60"># it's short</span>
+  </p>
+</div>

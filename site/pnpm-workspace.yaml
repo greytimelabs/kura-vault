@@ -1,0 +1,2 @@
+# Resolve only versions published at least two weeks ago, transitive ones included
+minimumReleaseAge: 20160
